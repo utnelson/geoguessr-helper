@@ -1,0 +1,14 @@
+{
+  "name": "geoguessr-helper-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API für den GeoGuessr Helper – ohne externe Abhängigkeiten (Node >= 22.13, node:sqlite)",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/server.js"
+  }
+}

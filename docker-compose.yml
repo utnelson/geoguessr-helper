@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    container_name: geoguessr-helper-backend
+    restart: unless-stopped
+    environment:
+      - MAX_UPLOAD_MB=20
+    volumes:
+      # SQLite-DB + hochgeladene Bilder – das hier sichern!
+      - ./data:/data
+
+  frontend:
+    build: ./frontend
+    container_name: geoguessr-helper-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"

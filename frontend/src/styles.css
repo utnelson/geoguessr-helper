@@ -1,0 +1,316 @@
+:root {
+  --bg: #0d1b2a;
+  --surface: #14263a;
+  --surface-2: #1c3350;
+  --border: #2a4566;
+  --text: #e6edf5;
+  --muted: #8ea3bb;
+  --accent: #f4b400;
+  --accent-text: #1a1300;
+  --green: #43c08a;
+  --danger: #ff6b6b;
+  --radius: 10px;
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; }
+button, input, select, textarea { font: inherit; color: inherit; }
+.muted { color: var(--muted); }
+
+/* ---------- Layout ---------- */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.app > .map-wrap { flex: 1; }
+/* feste Höhe, damit der Karten-Zoom beim Nachladen der Metas nicht verrutscht */
+.app > .panel { flex: 0 0 42vh; min-height: 160px; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 2;
+}
+.topbar h1 { font-size: 1.1rem; margin: 0; white-space: nowrap; }
+.topbar .search {
+  margin-left: auto;
+  width: min(280px, 40vw);
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.banner {
+  background: #5c1f1f;
+  color: #ffd7d7;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+/* ---------- Karte ---------- */
+.map-wrap { position: relative; min-height: 0; }
+.map-wrap.loading { display: grid; place-items: center; color: var(--muted); }
+.map { position: absolute; inset: 0; }
+.map-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(13, 27, 42, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  z-index: 1;
+}
+.map-tooltip span { color: var(--muted); }
+.map-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 12px;
+  background: rgba(13, 27, 42, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.map-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+/* ---------- Länder-Panel ---------- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-bottom: 2px solid var(--accent);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.flag { height: 30px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15); }
+.panel-title h2 { margin: 0; font-size: 1.25rem; }
+.panel-title small { color: var(--muted); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+.panel-body { overflow: auto; padding: 12px 16px 16px; }
+.group h3 {
+  margin: 8px 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.card-images { display: flex; gap: 2px; overflow-x: auto; background: #000; }
+.card-images img { height: 130px; flex: 1 0 auto; max-width: 100%; object-fit: cover; cursor: zoom-in; }
+.card-body { padding: 10px 12px 4px; flex: 1; }
+.card-body h4 { margin: 0 0 4px; }
+.card-body p { margin: 0; white-space: pre-wrap; color: #c8d5e3; font-size: 0.9rem; }
+.card-actions { display: flex; justify-content: flex-end; gap: 4px; padding: 6px 8px; }
+
+.empty { display: flex; align-items: center; gap: 16px; color: var(--muted); padding: 16px 0; }
+
+/* ---------- Buttons & Formulare ---------- */
+.btn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { filter: brightness(1.15); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+.btn.ghost { background: transparent; }
+.btn.small { padding: 3px 8px; font-size: 0.8rem; }
+.btn.danger { color: var(--danger); }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+  padding: 16px;
+}
+.modal {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.modal h2 { margin: 0 0 8px; font-size: 1.15rem; }
+.modal label { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+.modal input, .modal select, .modal textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.modal textarea { resize: vertical; }
+.row { display: flex; gap: 8px; }
+.row select, .row input { flex: 1; }
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.dropzone.over { border-color: var(--accent); color: var(--text); }
+kbd { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 0.8em; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.thumb { position: relative; }
+.thumb img { width: 96px; height: 72px; object-fit: cover; border-radius: 6px; display: block; }
+.thumb.new img { outline: 2px solid var(--green); }
+.thumb button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+}
+.error { color: var(--danger); margin: 8px 0 0; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: grid;
+  place-items: center;
+  z-index: 20;
+  cursor: zoom-out;
+}
+.lightbox img { max-width: 95vw; max-height: 95vh; border-radius: 6px; }
+
+@media (max-width: 700px) {
+  .topbar .muted { display: none; }
+  .app > .panel { flex-basis: 50vh; }
+}
+
+/* ---------- Regionen ---------- */
+.region-select {
+  max-width: 220px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.region-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: rgba(232, 89, 12, 0.15);
+  border-bottom: 1px solid #e8590c;
+  flex-wrap: wrap;
+}
+.region-bar .btn { margin-left: auto; }
+.section-title {
+  margin: 16px 0 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.link:hover { text-decoration: underline; }
+.meta-region-hint { font-size: 0.78rem; color: var(--muted); }
+
+/* Mehrere Regionen */
+.region-chips, .region-picker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.region-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(232, 89, 12, 0.25);
+  border: 1px solid #e8590c;
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 0.85rem;
+}
+.region-chip.whole { background: var(--surface-2); border-color: var(--border); padding-right: 10px; }
+.region-chip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 1rem;
+  line-height: 1;
+}
+.modal .region-picker select { width: auto; flex: 1; min-width: 180px; }
+.card-regions { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+backend/data/
+frontend/public/geo/
+*.log
+.DS_Store
