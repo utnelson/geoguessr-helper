@@ -27,9 +27,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
 }
-.app > .map-wrap { flex: 1; }
-/* feste Höhe, damit der Karten-Zoom beim Nachladen der Metas nicht verrutscht */
-.app > .panel { flex: 0 0 42vh; min-height: 160px; }
+.app { --side-w: min(440px, 42vw); }
+/* Hauptbereich: Karte links, Seitenleiste (Panel bzw. Formulare) rechts */
+.main { flex: 1; min-height: 0; display: flex; position: relative; }
+.main > .map-wrap { flex: 1; min-width: 0; }
+.main > .panel { order: 2; flex: 0 0 var(--side-w); border-left: 2px solid var(--accent); }
 
 .topbar {
   display: flex;
@@ -102,7 +104,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   flex-direction: column;
   min-height: 0;
   background: var(--surface);
-  border-bottom: 2px solid var(--accent);
 }
 .panel-head {
   display: flex;
@@ -248,9 +249,12 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
 }
 .lightbox img { max-width: 95vw; max-height: 95vh; border-radius: 6px; }
 
-@media (max-width: 700px) {
+/* Schmale Bildschirme: Seitenleiste wieder oben über der Karte */
+@media (max-width: 800px) {
   .topbar .muted { display: none; }
-  .app > .panel { flex-basis: 50vh; }
+  .app { --side-w: 100%; }
+  .main { flex-direction: column; }
+  .main > .panel { order: 0; flex: 0 0 45vh; border-left: none; border-bottom: 2px solid var(--accent); }
 }
 
 /* ---------- Regionen ---------- */
@@ -364,9 +368,6 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
   border-bottom: 1px solid #7b8cff;
 }
 .info-bar .btn { margin-left: auto; }
-/* In der Infografik bekommt die Karte den Platz, das Panel zeigt nur Kopf + Leisten */
-.app.infographic > .panel { flex: 0 0 auto; min-height: 0; }
-.app.infographic .panel-body { display: none; }
 .info-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .info-overlay svg { position: absolute; inset: 0; }
 .info-card {
@@ -433,3 +434,62 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .app.infographic .labels-toggle { display: none; }
 .info-card.clickable { cursor: pointer; }
 .info-card.clickable:hover { filter: brightness(1.15); }
+
+/* ---------- Seitenleiste: Formulare & Optionen ---------- */
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--side-w);
+  z-index: 6;
+  background: var(--surface);
+  border-left: 2px solid var(--accent);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+  overflow: auto;
+}
+.drawer > .drawer-form {
+  width: 100%;
+  max-height: none;
+  min-height: 100%;
+  border: none;
+  border-radius: 0;
+}
+.drawer-head { display: flex; align-items: center; justify-content: space-between; }
+.drawer-head h2 { margin: 0; }
+.sidebar-expand {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 3;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  padding: 12px 6px;
+  border: 1px solid var(--accent);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 600;
+}
+.collapse-btn { padding: 6px 10px; }
+
+/* ---------- Optionen ---------- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 8px 0; }
+.tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 12px; cursor: pointer; color: var(--muted); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.country-options { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.country-options details { border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+.country-options summary { cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+.summary-actions { margin-left: auto; display: flex; gap: 4px; }
+.country-option { display: flex !important; align-items: center; gap: 8px; padding: 3px 4px; margin: 0 !important; font-size: 0.9rem !important; color: var(--text) !important; cursor: pointer; }
+.country-option input { width: auto !important; }
+.country-option.off { color: var(--muted) !important; text-decoration: line-through; }
+.category-options { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 12px; }
+.category-option .row { align-items: center; }
+.category-option .count { min-width: 2.5em; text-align: right; font-size: 0.8rem; }
+.delete-move { margin-top: 4px; font-size: 0.85rem; flex-wrap: wrap; }
+.delete-move select { flex: 1 1 140px; min-width: 140px; width: auto; }
+
+/* ausgeschaltete Länder: Name gedämpft */
+.country-labels span.off { color: #9aa3ad; font-weight: 500; }

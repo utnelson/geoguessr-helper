@@ -26,6 +26,7 @@ interface Props {
   infoCategory: number | null;
   onInfographic: (categoryId: number | null) => void;
   onClose: () => void;
+  onCollapse: () => void;
   onAdd: () => void;
   onEdit: (m: Meta) => void;
   onDelete: (m: Meta) => void;
@@ -45,7 +46,7 @@ function groupByCategory(list: Meta[]): [string, Meta[]][] {
 export function CountryPanel({
   country, metas, loading, categories, regions, regionCounts, selectedRegions, onSelectRegions, metaRefs,
   groups, activeGroup, suggestedGroupCount, onSuggestGroups, onNewGroup, onEditGroup, infoCategory, onInfographic,
-  onClose, onAdd, onEdit, onDelete, onOpenImage,
+  onClose, onCollapse, onAdd, onEdit, onDelete, onOpenImage,
 }: Props) {
   const [filter, setFilter] = useState<number | 'all'>(infoCategory ?? 'all');
   const flag = flagUrl(country.iso);
@@ -107,7 +108,7 @@ export function CountryPanel({
             </div>
           )}
           <div className="card-body">
-            <h4>{m.title}</h4>
+            {m.title && <h4>{m.title}</h4>}
             {showRegions && m.regions.length > 0 && (
               <div className="card-regions">📍 {m.regions.map(metaRegionName).join(', ')}</div>
             )}
@@ -128,6 +129,7 @@ export function CountryPanel({
     <section className="panel">
       <header className="panel-head">
         <button className="btn ghost" onClick={onClose} title="Zurück zur Weltkarte">← Welt</button>
+        <button className="btn ghost collapse-btn" onClick={onCollapse} title="Seitenleiste einklappen – mehr Platz für die Karte">⟩</button>
         {flag && <img className="flag" src={flag} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />}
         <div className="panel-title">
           <h2>{country.name}</h2>

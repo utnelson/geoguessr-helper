@@ -1,4 +1,4 @@
-import type { Category, Meta, MetaImage, MetaInput, Region, RegionGroup } from './types';
+import type { Category, Meta, MetaImage, MetaInput, Region, RegionGroup, Settings } from './types';
 
 export interface GroupInput {
   name: string;
@@ -29,6 +29,14 @@ const json = (method: string, body: unknown): RequestInit => ({
 export const api = {
   categories: () => request<Category[]>('/api/categories'),
   createCategory: (name: string) => request<Category>('/api/categories', json('POST', { name })),
+  renameCategory: (id: number, name: string) => request<Category>(`/api/categories/${id}`, json('PUT', { name })),
+  orderCategories: (ids: number[]) => request<void>('/api/categories/order', json('PUT', { ids })),
+  /** moveTo: Zielkategorie für die Metas einer genutzten Kategorie */
+  deleteCategory: (id: number, moveTo?: number) =>
+    request<void>(`/api/categories/${id}`, json('DELETE', moveTo ? { move_to: moveTo } : {})),
+
+  settings: () => request<Settings>('/api/settings'),
+  saveSettings: (s: Partial<Settings>) => request<Settings>('/api/settings', json('PUT', s)),
 
   stats: () => request<{ iso: string; count: number }[]>('/api/stats'),
 

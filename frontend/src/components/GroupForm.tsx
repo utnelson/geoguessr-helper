@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { GROUP_COLORS } from '../geo';
 import type { CountryInfo, RegionGroup, RegionInfo } from '../types';
@@ -21,7 +21,6 @@ export function GroupForm({ country, regions, groups, group, initialMembers, onC
   const [members, setMembers] = useState<string[]>(initialMembers);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const backdropDown = useRef(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -74,13 +73,9 @@ export function GroupForm({ country, regions, groups, group, initialMembers, onC
   };
 
   return (
-    // Schließen erst beim click (nicht mousedown) – sonst landet der Klick nach dem Schließen auf der Karte
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => (backdropDown.current = e.target === e.currentTarget)}
-      onClick={(e) => backdropDown.current && e.target === e.currentTarget && onClose()}
-    >
-      <form className="modal" onSubmit={save}>
+    // Als Seitenleiste – die Karte bleibt sichtbar und bedienbar
+    <aside className="drawer">
+      <form className="modal drawer-form" onSubmit={save}>
         <h2>{group ? 'Gruppe bearbeiten' : 'Neue Regionsgruppe'} · {country.name}</h2>
 
         <label>Name</label>
@@ -130,6 +125,6 @@ export function GroupForm({ country, regions, groups, group, initialMembers, onC
           <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Speichere…' : 'Speichern'}</button>
         </div>
       </form>
-    </div>
+    </aside>
   );
 }

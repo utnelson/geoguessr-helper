@@ -6,6 +6,7 @@ import { WorldMap } from './components/WorldMap';
 import { CountryPanel } from './components/CountryPanel';
 import { MetaForm } from './components/MetaForm';
 import { GroupForm } from './components/GroupForm';
+import { OptionsDrawer } from './components/OptionsDrawer';
 import { Lightbox } from './components/Lightbox';
 
 // Hash: #DE (Land) oder #DE/DEU-1591,DEU-1601 (Land + eine oder mehrere admin1-Regionen)
@@ -38,6 +39,10 @@ export default function App() {
   const [worldMetas, setWorldMetas] = useState<Meta[]>([]);
   const [showLabels, setShowLabels] = useState(() => localStorage.getItem('labels') !== '0');
   const continent = CONTINENTS.find((c) => c.id === continentId) ?? null;
+  // Ausgeschaltete Länder (Optionen) – nicht auswählbar, z.B. ohne GeoGuessr-Coverage
+  const [disabled, setDisabled] = useState<Set<string>>(new Set());
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar') === 'collapsed');
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -47,11 +52,27 @@ export default function App() {
     setStats(Object.fromEntries(s.map((x) => [x.iso, x.count])));
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    setCategories(await api.categories());
+  }, []);
+
   useEffect(() => {
     loadCountries().then(setGeo).catch((e) => setError(e.message));
-    api.categories().then(setCategories).catch((e) => setError(`API nicht erreichbar: ${e.message}`));
+    loadCategories().catch((e) => setError(`API nicht erreichbar: ${e.message}`));
+    api.settings().then((s) => setDisabled(new Set(s.disabled_countries))).catch(() => {});
     refreshStats().catch(() => {});
-  }, [refreshStats]);
+  }, [refreshStats, loadCategories]);
+
+  useEffect(() => localStorage.setItem('sidebar', sidebarCollapsed ? 'collapsed' : 'open'), [sidebarCollapsed]);
+
+  const saveDisabled = async (isos: string[]) => {
+    try {
+      const s = await api.saveSettings({ disabled_countries: isos });
+      setDisabled(new Set(s.disabled_countries));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   // Auswahl ↔ URL-Hash (#DE), damit Links und Zurück-Button funktionieren
   useEffect(() => {
@@ -175,7 +196,8 @@ export default function App() {
       });
   }, [infoCategory, metas, metaRefs, regions]);
 
-  const country = selectedIso && geo ? geo.countries.get(selectedIso) ?? null : null;
+  // Ausgeschaltete Länder lassen sich nicht öffnen (auch nicht per Link)
+  const country = selectedIso && geo && !disabled.has(selectedIso) ? geo.countries.get(selectedIso) ?? null : null;
 
   // Welt-Infografik: ein Kasten pro Land (bzw. Meta), Linie zum Land, Land in Kastenfarbe
   const worldInfographic = useMemo<InfoItem[] | null>(() => {
@@ -185,7 +207,7 @@ export default function App() {
     for (const m of worldMetas) {
       if (m.category_id !== worldInfoCategory) continue;
       const c = geo.countries.get(m.country_iso);
-      if (!c || (continent && c.continent !== continent.id)) continue;
+      if (!c || disabled.has(c.iso) || (continent && c.continent !== continent.id)) continue;
       if (!colorOf.has(c.iso)) colorOf.set(c.iso, GROUP_COLORS[colorOf.size % GROUP_COLORS.length]);
       items.push({
         key: String(m.id),
@@ -200,11 +222,14 @@ export default function App() {
       });
     }
     return items;
-  }, [worldInfoCategory, worldMetas, geo, continent]);
+  }, [worldInfoCategory, worldMetas, geo, continent, disabled]);
 
   const countryList = useMemo(
-    () => (geo ? [...geo.countries.values()].sort((a, b) => a.name.localeCompare(b.name, 'de')) : []),
-    [geo],
+    () =>
+      geo
+        ? [...geo.countries.values()].filter((c) => !disabled.has(c.iso)).sort((a, b) => a.name.localeCompare(b.name, 'de'))
+        : [],
+    [geo, disabled],
   );
 
   const jumpTo = (value: string) => {
@@ -219,7 +244,7 @@ export default function App() {
   };
 
   const deleteMeta = async (m: Meta) => {
-    if (!confirm(`„${m.title}“ wirklich löschen?`)) return;
+    if (!confirm(`„${m.title || m.category_name}“ wirklich löschen?`)) return;
     await api.deleteMeta(m.id);
     if (selectedIso) await loadMetas(selectedIso);
     await refreshStats();
@@ -288,6 +313,7 @@ export default function App() {
         <datalist id="country-list">
           {countryList.map((c) => <option key={c.iso} value={c.name} />)}
         </datalist>
+        <button className="btn ghost" onClick={() => setOptionsOpen((v) => !v)} title="Optionen: Länder, Kategorien">⚙ Optionen</button>
       </header>
 
       {error && <div className="banner" onClick={() => setError(null)}>{error}</div>}
@@ -323,8 +349,15 @@ export default function App() {
         </div>
       )}
 
-      {country && (
+      <div className={`main ${country && !sidebarCollapsed ? 'with-sidebar' : ''}`}>
+      {country && sidebarCollapsed && (
+        <button className="sidebar-expand" onClick={() => setSidebarCollapsed(false)} title="Seitenleiste einblenden">
+          ⟨ <span>{country.name}</span>
+        </button>
+      )}
+      {country && !sidebarCollapsed && (
         <CountryPanel
+          onCollapse={() => setSidebarCollapsed(true)}
           country={country}
           metas={metas}
           loading={loadingMetas}
@@ -372,6 +405,7 @@ export default function App() {
           continent={continent}
           showLabels={showLabels}
           onToggleLabels={() => setShowLabels((v) => !v)}
+          disabled={disabled}
         />
       ) : (
         <div className="map-wrap loading">Lade Karte…</div>
@@ -403,6 +437,21 @@ export default function App() {
           onError={setError}
         />
       )}
+      {optionsOpen && geo && (
+        <OptionsDrawer
+          countries={geo.countries}
+          disabled={disabled}
+          stats={stats}
+          onDisabledChange={saveDisabled}
+          categories={categories}
+          onCategoriesChanged={async () => {
+            await loadCategories();
+            if (selectedIso) await loadMetas(selectedIso);
+          }}
+          onClose={() => setOptionsOpen(false)}
+        />
+      )}
+      </div>
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );

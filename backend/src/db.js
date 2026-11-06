@@ -116,6 +116,14 @@ export function openDb(file) {
     CREATE INDEX IF NOT EXISTS idx_metas_region ON metas(region_id);
   `);
 
+  // App-Einstellungen (JSON-Werte), z.B. ausgeschaltete Länder
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
   const count = db.prepare('SELECT COUNT(*) AS n FROM categories').get().n;
   if (count === 0) {
     const insert = db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)');

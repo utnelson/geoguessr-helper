@@ -23,6 +23,8 @@ interface Props {
   continent: { id: string; bbox: BBox } | null;
   showLabels: boolean;
   onToggleLabels: () => void;
+  /** ausgeschaltete Länder: grau, nicht anklickbar, Name gedämpft */
+  disabled: Set<string>;
 }
 
 // ---------- Paint-Ausdrücke: normale Ansicht vs. Infografik ----------
@@ -32,17 +34,19 @@ const HAS_METAS = ['>', ['to-number', ['coalesce', STATE('count'), 0]], 0] as Ex
 const HAS_INFO = ['==', ['typeof', STATE('info')], 'string'] as ExpressionSpecification;
 
 const DIM = '#1a2531'; // Länder außerhalb des gewählten Kontinents
+const OFF = '#4a4f56'; // ausgeschaltete Länder (Optionen): neutral grau, Karte bleibt erkennbar
 const COUNTRY_FILL: ExpressionSpecification = [
   'case',
+  IS('dim'), DIM,
+  IS('off'), OFF,
   IS('selected'), '#f4b400',
   IS('hover'), '#5aa9e6',
-  IS('dim'), DIM,
   ['interpolate', ['linear'], ['to-number', ['coalesce', STATE('count'), 0]], 0, '#34495e', 1, '#2e7d5b', 10, '#43c08a', 25, '#a3e05f'],
 ];
-const COUNTRY_FILL_INFO: ExpressionSpecification = ['case', IS('selected'), '#e9edf2', IS('hover'), '#5aa9e6', '#34495e'];
+const COUNTRY_FILL_INFO: ExpressionSpecification = ['case', IS('off'), OFF, IS('selected'), '#e9edf2', IS('hover'), '#5aa9e6', '#34495e'];
 // Welt-Infografik: Länder in der Farbe ihres Kastens
 const COUNTRY_FILL_WORLD_INFO: ExpressionSpecification = [
-  'case', HAS_INFO, ['to-color', STATE('info')], IS('hover'), '#5aa9e6', IS('dim'), DIM, '#4b5d70',
+  'case', IS('dim'), DIM, IS('off'), OFF, HAS_INFO, ['to-color', STATE('info')], IS('hover'), '#5aa9e6', '#4b5d70',
 ];
 
 const REGION_FILL: ExpressionSpecification = ['case', IS('selected'), '#e8590c', IS('hover'), '#ffffff', HAS_METAS, '#2e9e6b', '#000000'];
@@ -137,7 +141,7 @@ type Hover = { kind: 'country' | 'region'; id: string; name: string; sub?: strin
 
 export function WorldMap({
   geojson, countries, stats, selectedIso, onSelect, regionData, regionCounts, selectedRegions, onSelectRegions,
-  infographic, onOpenImage, continent, showLabels, onToggleLabels,
+  infographic, onOpenImage, continent, showLabels, onToggleLabels, disabled,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -146,8 +150,8 @@ export function WorldMap({
   const lastTarget = useRef<string | null>(null);
   // Auswahl, die per Strg+Klick entstanden ist → dafür die Ansicht nicht verändern
   const additiveSelection = useRef<string | null>(null);
-  const handlers = useRef({ onSelect, onSelectRegions, selectedIso, selectedRegions });
-  handlers.current = { onSelect, onSelectRegions, selectedIso, selectedRegions };
+  const handlers = useRef({ onSelect, onSelectRegions, selectedIso, selectedRegions, disabled });
+  handlers.current = { onSelect, onSelectRegions, selectedIso, selectedRegions, disabled };
 
   const [ready, setReady] = useState(false);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -233,8 +237,14 @@ export function WorldMap({
       map.setFeatureState(hovered, { hover: true });
     };
 
+    // Oberstes Feature unter der Maus – ausgeschaltete Länder zählen nicht
+    const pick = (point: maplibregl.PointLike) => {
+      const [f] = map.queryRenderedFeatures(point, { layers: ['region-fill', 'country-fill'] });
+      if (f && f.layer.id === 'country-fill' && handlers.current.disabled.has(String(f.properties.iso))) return undefined;
+      return f;
+    };
     map.on('mousemove', (e) => {
-      const [f] = map.queryRenderedFeatures(e.point, { layers: ['region-fill', 'country-fill'] });
+      const f = pick(e.point);
       if (!f) {
         clearHover();
         map.getCanvas().style.cursor = '';
@@ -259,7 +269,7 @@ export function WorldMap({
       setHover(null);
     });
     map.on('click', (e) => {
-      const [f] = map.queryRenderedFeatures(e.point, { layers: ['region-fill', 'country-fill'] });
+      const f = pick(e.point);
       if (!f) return;
       const { onSelect, onSelectRegions, selectedIso, selectedRegions } = handlers.current;
       const ev = e.originalEvent;
@@ -317,6 +327,13 @@ export function WorldMap({
       map.setFeatureState({ source: 'countries', id: iso }, { count: stats[iso] ?? 0 });
     }
   }, [ready, stats, countries]);
+
+  // Ausgeschaltete Länder
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    for (const iso of countries.keys()) map.setFeatureState({ source: 'countries', id: iso }, { off: disabled.has(iso) });
+  }, [ready, countries, disabled]);
 
   // Kontinent: andere Länder abdunkeln (nur in der Weltansicht)
   useEffect(() => {
@@ -465,7 +482,7 @@ export function WorldMap({
       [...countries.values()]
         .filter((c) => c.iso !== selectedIso && (selectedIso || !continent || c.continent === continent.id))
         .sort((a, b) => b.area - a.area),
-    [countries, selectedIso, continent],
+    [countries, selectedIso, continent, disabled],
   );
   if (showLabels && map && size.W) labels = layoutLabels(labelCountries, map, size.W, size.H);
 
@@ -517,7 +534,7 @@ export function WorldMap({
       {labels.length > 0 && (
         <div className="country-labels">
           {labels.map((l) => (
-            <span key={l.iso} style={{ left: l.x, top: l.y }}>{l.name}</span>
+            <span key={l.iso} className={disabled.has(l.iso) ? 'off' : undefined} style={{ left: l.x, top: l.y }}>{l.name}</span>
           ))}
         </div>
       )}
@@ -554,7 +571,7 @@ export function WorldMap({
                 {showImage && (
                   <img src={c.item.image!} alt={c.item.title} onClick={(e) => { e.stopPropagation(); onOpenImage(c.item.image!); }} />
                 )}
-                <div className="info-card-title">{c.item.title}</div>
+                {c.item.title && <div className="info-card-title">{c.item.title}</div>}
                 {showText && <div className="info-card-text">{c.item.text}</div>}
               </div>
             );
@@ -584,6 +601,7 @@ export function WorldMap({
             <span><i style={{ background: '#34495e' }} /> keine Metas</span>
             <span><i style={{ background: '#2e7d5b' }} /> wenige</span>
             <span><i style={{ background: '#a3e05f' }} /> viele</span>
+            {disabled.size > 0 && <span><i style={{ background: OFF }} /> ausgeschaltet</span>}
           </>
         )}
       </div>}

@@ -156,7 +156,8 @@ function validateMetaInput(body, partial = false, currentCountry = null) {
     }
     out.category_id = cid;
   }
-  if (!partial || body.title !== undefined) out.title = requireText(body.title, 'title');
+  // Titel ist optional – ein Meta kann auch nur aus Bild und/oder Beschreibung bestehen
+  if (!partial || body.title !== undefined) out.title = String(body.title ?? '').trim();
   if (!partial || body.text !== undefined) out.text = String(body.text ?? '');
 
   // Regionen: region_ids (vorhandene Regionen) und/oder admin1 ([{ ref, name }], werden bei Bedarf angelegt).
@@ -265,7 +266,13 @@ function route(method, pattern, handler) {
 route('GET', '/api/health', () => ({ ok: true }));
 
 route('GET', '/api/categories', () =>
-  db.prepare('SELECT id, name, sort FROM categories ORDER BY sort, name').all(),
+  db
+    .prepare(
+      `SELECT c.id, c.name, c.sort, COUNT(m.id) AS meta_count
+       FROM categories c LEFT JOIN metas m ON m.category_id = c.id
+       GROUP BY c.id ORDER BY c.sort, c.name`,
+    )
+    .all(),
 );
 
 route('POST', '/api/categories', async ({ req }) => {
@@ -278,6 +285,80 @@ route('POST', '/api/categories', async ({ req }) => {
   } catch {
     throw new HttpError(409, 'Kategorie existiert bereits');
   }
+});
+
+// Reihenfolge setzen: { ids: [3, 1, 2, …] }
+route('PUT', '/api/categories/order', async ({ req }) => {
+  const { ids } = await readJson(req);
+  if (!Array.isArray(ids)) throw new HttpError(400, '"ids" muss eine Liste sein');
+  transaction(() => {
+    const upd = db.prepare('UPDATE categories SET sort = ? WHERE id = ?');
+    ids.forEach((id, i) => upd.run(i, Number(id)));
+  });
+  return [204, null];
+});
+
+route('PUT', '/api/categories/:id', async ({ req, params }) => {
+  const id = Number(params.id);
+  if (!db.prepare('SELECT 1 FROM categories WHERE id = ?').get(id)) throw new HttpError(404, 'Kategorie nicht gefunden');
+  const name = requireText((await readJson(req)).name, 'name');
+  try {
+    db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(name, id);
+  } catch {
+    throw new HttpError(409, 'Kategorie existiert bereits');
+  }
+  return db.prepare('SELECT id, name, sort FROM categories WHERE id = ?').get(id);
+});
+
+// Löschen; genutzte Kategorien nur mit { move_to: <id> } – deren Metas wandern dorthin
+route('DELETE', '/api/categories/:id', async ({ req, params }) => {
+  const id = Number(params.id);
+  if (!db.prepare('SELECT 1 FROM categories WHERE id = ?').get(id)) throw new HttpError(404, 'Kategorie nicht gefunden');
+  const body = await readJson(req);
+  const used = db.prepare('SELECT COUNT(*) AS n FROM metas WHERE category_id = ?').get(id).n;
+  transaction(() => {
+    if (used > 0) {
+      const target = Number(body.move_to);
+      if (!target || target === id || !db.prepare('SELECT 1 FROM categories WHERE id = ?').get(target)) {
+        throw new HttpError(409, `Kategorie wird von ${used} Metas genutzt – Zielkategorie angeben`);
+      }
+      db.prepare('UPDATE metas SET category_id = ? WHERE category_id = ?').run(target, id);
+    }
+    db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+  });
+  return [204, null];
+});
+
+// ---------- Einstellungen ----------
+const SETTINGS_DEFAULTS = { disabled_countries: [] };
+
+function readSettings() {
+  const out = { ...SETTINGS_DEFAULTS };
+  for (const { key, value } of db.prepare('SELECT key, value FROM settings').all()) {
+    if (key in SETTINGS_DEFAULTS) {
+      try {
+        out[key] = JSON.parse(value);
+      } catch {
+        /* kaputter Wert → Standard */
+      }
+    }
+  }
+  return out;
+}
+
+route('GET', '/api/settings', () => readSettings());
+
+route('PUT', '/api/settings', async ({ req }) => {
+  const body = await readJson(req);
+  const upsert = db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  );
+  if (body.disabled_countries !== undefined) {
+    if (!Array.isArray(body.disabled_countries)) throw new HttpError(400, '"disabled_countries" muss eine Liste sein');
+    const isos = [...new Set(body.disabled_countries.map(normIso))].sort();
+    upsert.run('disabled_countries', JSON.stringify(isos));
+  }
+  return readSettings();
 });
 
 // Anzahl Metas pro Land – für die Einfärbung der Weltkarte

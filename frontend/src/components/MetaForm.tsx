@@ -64,7 +64,6 @@ export function MetaForm({
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const backdropDown = useRef(false);
 
   const addFiles = (files: Iterable<File>) => {
     const imgs = [...files].filter((f) => f.type.startsWith('image/'));
@@ -104,7 +103,9 @@ export function MetaForm({
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return setError('Titel fehlt');
+    if (!title.trim() && !text.trim() && existing.length + pending.length === 0) {
+      return setError('Bitte mindestens Titel, Beschreibung oder ein Bild angeben');
+    }
     setSaving(true);
     setError(null);
     try {
@@ -127,13 +128,9 @@ export function MetaForm({
   };
 
   return (
-    // Schließen erst beim click (nicht mousedown) – sonst landet der Klick nach dem Schließen auf der Karte
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => (backdropDown.current = e.target === e.currentTarget)}
-      onClick={(e) => backdropDown.current && e.target === e.currentTarget && onClose()}
-    >
-      <form className="modal" onSubmit={save}>
+    // Als Seitenleiste – die Karte bleibt sichtbar und bedienbar
+    <aside className="drawer">
+      <form className="modal drawer-form" onSubmit={save}>
         <h2>{meta ? 'Meta bearbeiten' : 'Neues Meta'} · {country.name}</h2>
 
         <label>Kategorie</label>
@@ -191,7 +188,7 @@ export function MetaForm({
         </div>
         {regions === null && <span className="meta-region-hint">Regionen werden geladen…</span>}
 
-        <label>Titel</label>
+        <label>Titel (optional)</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="z.B. Gelbe Kennzeichen hinten" autoFocus={!meta} />
 
         <label>Beschreibung</label>
@@ -242,6 +239,6 @@ export function MetaForm({
           </button>
         </div>
       </form>
-    </div>
+    </aside>
   );
 }

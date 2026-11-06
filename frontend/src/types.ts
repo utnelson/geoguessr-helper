@@ -2,6 +2,13 @@ export interface Category {
   id: number;
   name: string;
   sort: number;
+  /** Anzahl Metas (nur bei GET /api/categories) */
+  meta_count?: number;
+}
+
+export interface Settings {
+  /** ausgeschaltete Länder (z.B. ohne GeoGuessr-Coverage) – nicht auswählbar */
+  disabled_countries: string[];
 }
 
 export interface MetaImage {

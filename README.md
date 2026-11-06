@@ -53,6 +53,10 @@ docker-compose.yml
 |---|---|---|
 | GET | `/api/categories` | Kategorien |
 | POST | `/api/categories` | `{ name }` |
+| PUT | `/api/categories/:id` | umbenennen: `{ name }` |
+| PUT | `/api/categories/order` | Reihenfolge: `{ ids: [...] }` |
+| DELETE | `/api/categories/:id` | löschen; genutzte nur mit `{ move_to: <id> }` (Metas wandern dorthin) |
+| GET / PUT | `/api/settings` | Einstellungen, z.B. `{ disabled_countries: ["AQ", …] }` |
 | GET | `/api/stats` | Anzahl Metas je Land (Karten-Einfärbung) |
 | GET | `/api/categories/:id/metas` | landesweite Metas einer Kategorie in allen Ländern (Welt-Infografik) |
 | GET | `/api/countries/:iso/metas` | Metas eines Landes inkl. Bilder |
@@ -60,7 +64,7 @@ docker-compose.yml
 | POST | `/api/regions` | admin1: `{ country_iso, name, source: 'admin1', ref }` (legt an oder liefert vorhandene) · Gruppe: `{ country_iso, name, source: 'group', color, members: [ref…] }` |
 | PUT | `/api/regions/:id` | Gruppe bearbeiten: `{ name?, color?, members? }` |
 | DELETE | `/api/regions/:id` | Gruppe löschen; Body `{ members: [{ ref, name }] }` stellt ihre Metas auf die einzelnen Regionen um |
-| POST | `/api/metas` | `{ country_iso, category_id, title, text, admin1?: [{ ref, name }], region_ids?: [] }` |
+| POST | `/api/metas` | `{ country_iso, category_id, title?, text, admin1?: [{ ref, name }], region_ids?: [] }` |
 | PUT / DELETE | `/api/metas/:id` | bearbeiten / löschen (Bilder werden mitgelöscht); ohne `admin1`/`region_ids` bleiben die Regionen unverändert |
 | POST | `/api/metas/:id/images` | Body = Bilddatei, `Content-Type: image/*` |
 | DELETE | `/api/images/:id` | Bild löschen |
@@ -81,7 +85,15 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 
 ## Bedienung
 
-- Land anklicken oder oben suchen → Zoom + Meta-Panel. Der Link (`#DE`) ist teilbar/bookmarkbar.
+- Land anklicken oder oben suchen → Zoom + Meta-Panel als **Seitenleiste rechts**. Mit **⟩** einklappen
+  (volle Kartenbreite), mit dem Reiter am rechten Rand wieder öffnen. Der Link (`#DE`) ist teilbar/bookmarkbar.
+- Meta- und Gruppenformulare öffnen sich ebenfalls in der Seitenleiste – die Karte bleibt sichtbar.
+  Der **Titel ist optional**; ein Meta braucht nur Titel, Beschreibung oder ein Bild.
+- **⚙ Optionen** (oben rechts):
+  - *Länder*: Länder aus-/einschalten (einzeln oder pro Kontinent), z.B. ohne GeoGuessr-Coverage. Ausgeschaltete
+    Länder sind grau und nicht anklickbar (Karte und Namen bleiben sichtbar), nicht in Suche/Infografik. Metas bleiben erhalten.
+    Gilt für alle Nutzer (in der DB gespeichert).
+  - *Kategorien*: anlegen, umbenennen, Reihenfolge ändern, löschen (genutzte → Metas in andere Kategorie verschieben).
 - **Kontinente:** In der Weltansicht oben *Europa*, *Asien* … wählen → Karte zoomt hin, andere Länder werden
   abgedunkelt. Die Auswahl bleibt gespeichert (auch nach Rückkehr aus einem Land).
 - **Welt-Infografik:** oben *🗺 Infografik: Kategorie* wählen → jedes Land mit einem **landesweiten** Meta dieser
