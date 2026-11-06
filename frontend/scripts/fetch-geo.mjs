@@ -111,6 +111,8 @@ const a3ToIso = new Map();
         name: p.NAME_DE || p.NAME || p.ADMIN,
         name_en: p.NAME || p.ADMIN,
         continent: p.CONTINENT,
+        // Natural-Earth-Beschriftungspunkt (für Ländernamen und Infografik-Linien)
+        label: typeof p.LABEL_X === 'number' ? [r3(p.LABEL_X), r3(p.LABEL_Y)] : null,
       },
       geometry: cleanGeometry(f.geometry, 0),
     };
@@ -151,6 +153,8 @@ for (const f of admin1Raw.features) {
       name_en: p.name_en || p.name || '',
       type: p.type_en || p.type || '',
       code: valid(p.iso_3166_2) && !String(p.iso_3166_2).endsWith('~') ? p.iso_3166_2 : '',
+      // übergeordnete Region laut Natural Earth (z.B. Japan: "Tohoku") – Vorschlag für Regionsgruppen
+      group: valid(p.region) ? String(p.region) : '',
     },
     geometry,
   });

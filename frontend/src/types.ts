@@ -36,11 +36,14 @@ export interface MetaInput {
   admin1?: { ref: string; name: string }[];
 }
 
+export type RegionSource = 'admin1' | 'group' | 'custom';
+
 export interface MetaRegion {
   id: number;
   name: string;
   ref: string | null;
-  source: 'admin1' | 'custom';
+  source: RegionSource;
+  color: string | null;
 }
 
 export type BBox = [number, number, number, number]; // [west, south, east, north]
@@ -51,6 +54,10 @@ export interface CountryInfo {
   nameEn: string;
   continent: string;
   bbox: BBox;
+  /** Beschriftungspunkt [lng, lat] */
+  label: [number, number];
+  /** Fläche des größten Teils (Grad², nur zum Sortieren) */
+  area: number;
 }
 
 /** Region aus der Datenbank (wird beim ersten Regionen-Meta angelegt) */
@@ -58,10 +65,16 @@ export interface Region {
   id: number;
   country_iso: string;
   name: string;
-  source: 'admin1' | 'custom';
+  source: RegionSource;
   ref: string | null;
+  color: string | null;
   geometry: string | null;
+  /** admin1-Mitglieder (nur bei Gruppen) */
+  members: string[];
 }
+
+/** Regionsgruppe, z.B. „Kansai“ = mehrere Präfekturen */
+export type RegionGroup = Region & { source: 'group'; meta_count: number };
 
 /** admin1-Region aus public/geo/admin1/<ISO>.geojson */
 export interface RegionInfo {
@@ -70,5 +83,23 @@ export interface RegionInfo {
   nameEn: string;
   type: string;
   code: string; // ISO 3166-2, z.B. "DE-BY" (kann leer sein)
+  /** übergeordnete Region laut Natural Earth (Vorschlag für Gruppen), kann leer sein */
+  group: string;
   bbox: BBox;
+}
+
+/** Ein Kasten der Infografik-Ansicht (ein Meta, verbunden mit seinen Regionen) */
+export interface InfoItem {
+  key: string;
+  color: string;
+  /** admin1-Regionen, die eingefärbt werden (leer = landesweit, ohne Linie) */
+  refs: string[];
+  label: string;
+  title: string;
+  text: string;
+  image: string | null;
+  /** Welt-Infografik: Land, das eingefärbt wird und per Klick geöffnet werden kann */
+  iso?: string;
+  /** fester Ankerpunkt [lng, lat] (sonst aus den Regionen berechnet) */
+  anchor?: [number, number];
 }

@@ -29,7 +29,8 @@ export function openDb(file) {
       sort       INTEGER NOT NULL DEFAULT 0
     );
 
-    -- Regionen: admin1 (aus Natural Earth, ref = adm1_code, Geometrie liegt im Frontend)
+    -- Regionen: admin1 (aus Natural Earth, ref = adm1_code, Geometrie liegt im Frontend),
+    -- Gruppen aus admin1-Regionen (source = 'group', Mitglieder in region_members, mit Farbe)
     -- oder selbst gezeichnet (source = 'custom', Geometrie als GeoJSON)
     CREATE TABLE IF NOT EXISTS regions (
       id          INTEGER PRIMARY KEY,
@@ -84,6 +85,15 @@ export function openDb(file) {
   // Migration Etappe 2: admin1-Regionen über ihren Natural-Earth-Code (adm1_code) referenzieren
   const regionCols = db.prepare('PRAGMA table_info(regions)').all().map((c) => c.name);
   if (!regionCols.includes('ref')) db.exec('ALTER TABLE regions ADD COLUMN ref TEXT');
+  // Migration: Regionsgruppen (source = 'group') mit Farbe und admin1-Mitgliedern
+  if (!regionCols.includes('color')) db.exec('ALTER TABLE regions ADD COLUMN color TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS region_members (
+      region_id INTEGER NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
+      ref       TEXT NOT NULL,
+      PRIMARY KEY (region_id, ref)
+    );
+  `);
   // Migration: ein Meta kann für mehrere Regionen gelten (metas.region_id → meta_regions)
   const hasMetaRegions = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta_regions'")

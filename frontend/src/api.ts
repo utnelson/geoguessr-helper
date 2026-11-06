@@ -1,4 +1,10 @@
-import type { Category, Meta, MetaImage, MetaInput, Region } from './types';
+import type { Category, Meta, MetaImage, MetaInput, Region, RegionGroup } from './types';
+
+export interface GroupInput {
+  name: string;
+  color: string;
+  members: string[];
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -27,10 +33,15 @@ export const api = {
   stats: () => request<{ iso: string; count: number }[]>('/api/stats'),
 
   countryRegions: (iso: string) => request<(Region & { meta_count: number })[]>(`/api/countries/${encodeURIComponent(iso)}/regions`),
-  /** admin1-Region anlegen bzw. vorhandene (gleiche ref) zurückgeben */
-  ensureRegion: (r: { country_iso: string; name: string; source: 'admin1'; ref: string }) =>
-    request<Region>('/api/regions', json('POST', r)),
+  createGroup: (iso: string, g: GroupInput) =>
+    request<RegionGroup>('/api/regions', json('POST', { ...g, country_iso: iso, source: 'group' })),
+  updateGroup: (id: number, g: Partial<GroupInput>) => request<RegionGroup>(`/api/regions/${id}`, json('PUT', g)),
+  /** members: Namen der Mitglieder, damit Metas der Gruppe auf die einzelnen Regionen umgestellt werden */
+  deleteGroup: (id: number, members: { ref: string; name: string }[]) =>
+    request<void>(`/api/regions/${id}`, json('DELETE', { members })),
 
+  /** landesweite Metas einer Kategorie in allen Ländern */
+  categoryMetas: (categoryId: number) => request<Meta[]>(`/api/categories/${categoryId}/metas`),
   countryMetas: (iso: string) => request<Meta[]>(`/api/countries/${encodeURIComponent(iso)}/metas`),
   createMeta: (m: MetaInput) => request<Meta>('/api/metas', json('POST', m)),
   updateMeta: (id: number, m: Partial<MetaInput>) => request<Meta>(`/api/metas/${id}`, json('PUT', m)),

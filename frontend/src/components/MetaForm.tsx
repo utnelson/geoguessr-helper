@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import type { Category, CountryInfo, Meta, MetaImage, RegionInfo } from '../types';
+import type { Category, CountryInfo, Meta, MetaImage, RegionGroup, RegionInfo } from '../types';
 
 interface Props {
   country: CountryInfo;
   categories: Category[];
   meta: Meta | null; // null = neu anlegen
   regions: Map<string, RegionInfo> | null;
-  /** vorausgewählte admin1-Regionen (adm1_code) für neue Metas, leer = ganzes Land */
+  groups: RegionGroup[];
+  /** vorausgewählte admin1-Regionen (adm1_code) / Gruppen für neue Metas, beides leer = ganzes Land */
   initialRegionRefs: string[];
+  initialGroupIds: number[];
   onClose: () => void;
   onSaved: () => void;
   onCategoryCreated: (c: Category) => void;
@@ -19,21 +21,34 @@ interface PendingFile {
   preview: string;
 }
 
-/** Region im Formular: admin1 (ref) oder vorhandene Region ohne admin1-Code (id) */
-type PickedRegion = { ref: string | null; id: number | null; name: string };
+/** Region im Formular: admin1 (ref) oder vorhandene Region/Gruppe ohne admin1-Code (id) */
+type PickedRegion = { ref: string | null; id: number | null; name: string; color?: string | null };
 const pickedKey = (r: PickedRegion) => (r.ref ? `ref:${r.ref}` : `id:${r.id}`);
 
-export function MetaForm({ country, categories, meta, regions, initialRegionRefs, onClose, onSaved, onCategoryCreated }: Props) {
+export function MetaForm({
+  country, categories, meta, regions, groups, initialRegionRefs, initialGroupIds, onClose, onSaved, onCategoryCreated,
+}: Props) {
   const [categoryId, setCategoryId] = useState<number>(meta?.category_id ?? categories[0]?.id ?? 0);
   const [title, setTitle] = useState(meta?.title ?? '');
   const [text, setText] = useState(meta?.text ?? '');
   const [picked, setPicked] = useState<PickedRegion[]>(() =>
     meta
-      ? meta.regions.map((r) => ({ ref: r.ref, id: r.id, name: (r.ref && regions?.get(r.ref)?.name) || r.name }))
-      : initialRegionRefs.map((ref) => ({ ref, id: null, name: regions?.get(ref)?.name ?? ref })),
+      ? meta.regions.map((r) => ({ ref: r.ref, id: r.id, name: (r.ref && regions?.get(r.ref)?.name) || r.name, color: r.color }))
+      : [
+          ...groups.filter((g) => initialGroupIds.includes(g.id)).map((g) => ({ ref: null, id: g.id, name: g.name, color: g.color })),
+          ...initialRegionRefs.map((ref) => ({ ref, id: null, name: regions?.get(ref)?.name ?? ref })),
+        ],
   );
   const pickedRefs = new Set(picked.map((r) => r.ref));
-  const addRegion = (ref: string) => {
+  const pickedIds = new Set(picked.map((r) => r.id));
+  // Wert aus dem Dropdown: "ref:<adm1_code>" oder "group:<id>"
+  const addRegion = (value: string) => {
+    if (value.startsWith('group:')) {
+      const g = groups.find((x) => x.id === Number(value.slice(6)));
+      if (g && !pickedIds.has(g.id)) setPicked((p) => [...p, { ref: null, id: g.id, name: g.name, color: g.color }]);
+      return;
+    }
+    const ref = value.slice(4);
     const info = regions?.get(ref);
     if (info && !pickedRefs.has(ref)) setPicked((p) => [...p, { ref, id: null, name: info.name }]);
   };
@@ -144,20 +159,30 @@ export function MetaForm({ country, categories, meta, regions, initialRegionRefs
             <span className="region-chip whole">Ganzes Land ({country.name})</span>
           ) : (
             picked.map((r) => (
-              <span key={pickedKey(r)} className="region-chip">
+              <span key={pickedKey(r)} className="region-chip" style={r.color ? { borderColor: r.color } : undefined}>
+                {r.color && <i className="group-dot" style={{ background: r.color }} />}
                 {r.name}
                 <button type="button" title="Entfernen" onClick={() => setPicked((p) => p.filter((x) => pickedKey(x) !== pickedKey(r)))}>×</button>
               </span>
             ))
           )}
-          {regionList.length > 0 && (
-            <select value="" onChange={(e) => addRegion(e.target.value)}>
-              <option value="">+ Region hinzufügen…</option>
-              {regionList.filter((r) => !pickedRefs.has(r.id)).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}{r.type ? ` (${r.type})` : ''}
-                </option>
-              ))}
+          {(regionList.length > 0 || groups.length > 0) && (
+            <select value="" onChange={(e) => e.target.value && addRegion(e.target.value)}>
+              <option value="">+ Region / Gruppe hinzufügen…</option>
+              {groups.length > 0 && (
+                <optgroup label="Gruppen">
+                  {groups.filter((g) => !pickedIds.has(g.id)).map((g) => (
+                    <option key={g.id} value={`group:${g.id}`}>{g.name} ({g.members.length} Regionen)</option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="Regionen">
+                {regionList.filter((r) => !pickedRefs.has(r.id)).map((r) => (
+                  <option key={r.id} value={`ref:${r.id}`}>
+                    {r.name}{r.type ? ` (${r.type})` : ''}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           )}
           {picked.length > 0 && (

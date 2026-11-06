@@ -103,7 +103,7 @@ function getMeta(id) {
     .map(withUrl);
   meta.regions = db
     .prepare(
-      `SELECT r.id, r.name, r.ref, r.source FROM meta_regions mr
+      `SELECT r.id, r.name, r.ref, r.source, r.color FROM meta_regions mr
        JOIN regions r ON r.id = mr.region_id WHERE mr.meta_id = ? ORDER BY r.name`,
     )
     .all(id);
@@ -134,7 +134,7 @@ function listCountryMetas(iso) {
     .all(iso);
   const regions = db
     .prepare(
-      `SELECT mr.meta_id, r.id, r.name, r.ref, r.source
+      `SELECT mr.meta_id, r.id, r.name, r.ref, r.source, r.color
        FROM meta_regions mr JOIN regions r ON r.id = mr.region_id
        JOIN metas m ON m.id = mr.meta_id
        WHERE m.country_iso = ? ORDER BY r.name`,
@@ -217,12 +217,38 @@ function transaction(fn) {
   }
 }
 
-const REGION_SOURCES = new Set(['admin1', 'custom']);
+const REGION_SOURCES = new Set(['admin1', 'group', 'custom']);
+const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function regionMembers(id) {
+  return db.prepare('SELECT ref FROM region_members WHERE region_id = ? ORDER BY ref').all(id).map((r) => r.ref);
+}
 
 function getRegion(id) {
-  return db
-    .prepare('SELECT id, country_iso, name, source, ref, geometry FROM regions WHERE id = ?')
+  const region = db
+    .prepare('SELECT id, country_iso, name, source, ref, color, geometry FROM regions WHERE id = ?')
     .get(id);
+  if (region) region.members = region.source === 'group' ? regionMembers(id) : [];
+  return region;
+}
+
+function parseColor(v) {
+  if (v == null || v === '') return null;
+  if (!COLOR_RE.test(String(v))) throw new HttpError(400, 'Farbe muss im Format #rrggbb sein');
+  return String(v).toLowerCase();
+}
+
+function parseMembers(v) {
+  if (!Array.isArray(v)) throw new HttpError(400, '"members" muss eine Liste sein');
+  const refs = [...new Set(v.map((x) => String(x ?? '').trim()).filter(Boolean))];
+  if (refs.length === 0) throw new HttpError(400, 'Eine Gruppe braucht mindestens eine Region');
+  return refs;
+}
+
+function setMembers(regionId, refs) {
+  db.prepare('DELETE FROM region_members WHERE region_id = ?').run(regionId);
+  const insert = db.prepare('INSERT INTO region_members (region_id, ref) VALUES (?, ?)');
+  for (const ref of refs) insert.run(regionId, ref);
 }
 
 // ---------- Routen ----------
@@ -261,17 +287,50 @@ route('GET', '/api/stats', () =>
 
 route('GET', '/api/countries/:iso/metas', ({ params }) => listCountryMetas(normIso(params.iso)));
 
-// Regionen eines Landes inkl. Anzahl Metas (für die Einfärbung beim Zoom)
-route('GET', '/api/countries/:iso/regions', ({ params }) =>
-  db
+// Allgemeine (landesweite) Metas einer Kategorie in allen Ländern – für die Welt-Infografik
+route('GET', '/api/categories/:id/metas', ({ params }) => {
+  const id = Number(params.id);
+  const metas = db
     .prepare(
-      `SELECT r.id, r.country_iso, r.name, r.source, r.ref, r.geometry, COUNT(m.meta_id) AS meta_count
+      `SELECT m.*, c.name AS category_name
+       FROM metas m JOIN categories c ON c.id = m.category_id
+       WHERE m.category_id = ? AND NOT EXISTS (SELECT 1 FROM meta_regions mr WHERE mr.meta_id = m.id)
+       ORDER BY m.country_iso, m.id`,
+    )
+    .all(id);
+  if (metas.length === 0) return [];
+  const images = db
+    .prepare(
+      `SELECT i.id, i.meta_id, i.filename, i.caption FROM meta_images i
+       JOIN metas m ON m.id = i.meta_id WHERE m.category_id = ? ORDER BY i.id`,
+    )
+    .all(id);
+  const byMeta = new Map(metas.map((m) => [m.id, { ...m, images: [], regions: [] }]));
+  for (const img of images) byMeta.get(img.meta_id)?.images.push(withUrl(img));
+  return [...byMeta.values()];
+});
+
+// Regionen eines Landes inkl. Anzahl Metas und – bei Gruppen – den Mitgliedern
+route('GET', '/api/countries/:iso/regions', ({ params }) => {
+  const iso = normIso(params.iso);
+  const regions = db
+    .prepare(
+      `SELECT r.id, r.country_iso, r.name, r.source, r.ref, r.color, r.geometry, COUNT(m.meta_id) AS meta_count
        FROM regions r LEFT JOIN meta_regions m ON m.region_id = r.id
        WHERE r.country_iso = ?
        GROUP BY r.id ORDER BY r.name`,
     )
-    .all(normIso(params.iso)),
-);
+    .all(iso);
+  const members = db
+    .prepare(
+      `SELECT rm.region_id, rm.ref FROM region_members rm
+       JOIN regions r ON r.id = rm.region_id WHERE r.country_iso = ? ORDER BY rm.ref`,
+    )
+    .all(iso);
+  const byId = new Map(regions.map((r) => [r.id, { ...r, members: [] }]));
+  for (const m of members) byId.get(m.region_id)?.members.push(m.ref);
+  return [...byId.values()];
+});
 
 // Region anlegen – admin1-Regionen werden über (source, ref) wiederverwendet
 route('POST', '/api/regions', async ({ req }) => {
@@ -285,10 +344,61 @@ route('POST', '/api/regions', async ({ req }) => {
   const geometry = body.geometry == null ? null : JSON.stringify(body.geometry);
 
   if (source === 'admin1') return getRegion(upsertAdmin1Region(country_iso, ref, name));
-  const r = db
-    .prepare('INSERT INTO regions (country_iso, name, source, ref, geometry) VALUES (?, ?, ?, ?, ?)')
-    .run(country_iso, name, source, ref, geometry);
-  return [201, getRegion(Number(r.lastInsertRowid))];
+  const color = parseColor(body.color);
+  const members = source === 'group' ? parseMembers(body.members) : [];
+  const id = transaction(() => {
+    const r = db
+      .prepare('INSERT INTO regions (country_iso, name, source, ref, color, geometry) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(country_iso, name, source, ref, color, geometry);
+    const id = Number(r.lastInsertRowid);
+    if (source === 'group') setMembers(id, members);
+    return id;
+  });
+  return [201, getRegion(id)];
+});
+
+// Gruppe (oder eigene Region) bearbeiten: Name, Farbe, Mitglieder
+route('PUT', '/api/regions/:id', async ({ req, params }) => {
+  const id = Number(params.id);
+  const region = getRegion(id);
+  if (!region) throw new HttpError(404, 'Region nicht gefunden');
+  if (region.source === 'admin1') throw new HttpError(400, 'admin1-Regionen können nicht bearbeitet werden');
+  const body = await readJson(req);
+  transaction(() => {
+    if (body.name !== undefined) db.prepare('UPDATE regions SET name = ? WHERE id = ?').run(requireText(body.name, 'name'), id);
+    if (body.color !== undefined) db.prepare('UPDATE regions SET color = ? WHERE id = ?').run(parseColor(body.color), id);
+    if (body.members !== undefined && region.source === 'group') setMembers(id, parseMembers(body.members));
+  });
+  return getRegion(id);
+});
+
+// Gruppe löschen. Metas, die die Gruppe nutzen, werden auf deren Mitglieder umgestellt,
+// wenn der Body die Namen liefert: { members: [{ ref, name }] } – sonst verlieren sie nur die Gruppe.
+route('DELETE', '/api/regions/:id', async ({ req, params }) => {
+  const id = Number(params.id);
+  const region = getRegion(id);
+  if (!region) throw new HttpError(404, 'Region nicht gefunden');
+  if (region.source === 'admin1') throw new HttpError(400, 'admin1-Regionen können nicht gelöscht werden');
+  const body = await readJson(req);
+  const names = new Map((Array.isArray(body.members) ? body.members : []).map((m) => [String(m?.ref), String(m?.name ?? '')]));
+  transaction(() => {
+    const metaIds = db.prepare('SELECT meta_id FROM meta_regions WHERE region_id = ?').all(id).map((r) => r.meta_id);
+    if (region.source === 'group' && names.size) {
+      const link = db.prepare('INSERT OR IGNORE INTO meta_regions (meta_id, region_id) VALUES (?, ?)');
+      for (const ref of region.members) {
+        const name = names.get(ref);
+        if (!name) continue;
+        const rid = upsertAdmin1Region(region.country_iso, ref, name);
+        for (const metaId of metaIds) link.run(metaId, rid);
+      }
+    }
+    db.prepare('DELETE FROM regions WHERE id = ?').run(id);
+    // metas.region_id (Kompatibilität) neu setzen
+    const first = db.prepare('SELECT region_id FROM meta_regions WHERE meta_id = ? LIMIT 1');
+    const upd = db.prepare('UPDATE metas SET region_id = ? WHERE id = ?');
+    for (const metaId of metaIds) upd.run(first.get(metaId)?.region_id ?? null, metaId);
+  });
+  return [204, null];
 });
 
 route('POST', '/api/metas', async ({ req }) => {
