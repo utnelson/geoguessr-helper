@@ -314,7 +314,7 @@ export default function App() {
         <datalist id="country-list">
           {countryList.map((c) => <option key={c.iso} value={c.name} />)}
         </datalist>
-        <button className="btn ghost" onClick={() => setOptionsOpen((v) => !v)} title="Optionen: Länder, Kategorien">⚙ Optionen</button>
+        <button className="btn ghost" onClick={() => setOptionsOpen((v) => !v)} title="Optionen: Länder, Kategorien, Backup">⚙ Optionen</button>
       </header>
 
       {error && <div className="banner" onClick={() => setError(null)}>{error}</div>}

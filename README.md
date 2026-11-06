@@ -57,6 +57,9 @@ docker-compose.yml
 | PUT | `/api/categories/order` | Reihenfolge: `{ ids: [...] }` |
 | DELETE | `/api/categories/:id` | löschen; genutzte nur mit `{ move_to: <id> }` (Metas wandern dorthin) |
 | GET / PUT | `/api/settings` | Einstellungen, z.B. `{ disabled_countries: ["AQ", …] }` |
+| GET | `/api/backup` | Backup als ZIP herunterladen (`geo.db` + `uploads/`) |
+| POST | `/api/backup` | Backup einspielen, Body = ZIP (alter Stand → `data/vor-restore-…`) |
+| GET | `/api/backup/info` | Größe/Anzahl für den Backup-Tab |
 | GET | `/api/stats` | Anzahl Metas je Land (Karten-Einfärbung) |
 | GET | `/api/categories/:id/metas` | landesweite Metas einer Kategorie in allen Ländern (Welt-Infografik) |
 | GET | `/api/countries/:iso/metas` | Metas eines Landes inkl. Bilder |
@@ -95,6 +98,18 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
     Länder sind grau und nicht anklickbar (Karte und Namen bleiben sichtbar), nicht in Suche/Infografik. Metas bleiben erhalten.
     Gilt für alle Nutzer (in der DB gespeichert).
   - *Kategorien*: anlegen, umbenennen, Reihenfolge ändern, löschen (genutzte → Metas in andere Kategorie verschieben).
+  - *Backup*: alles als ZIP herunterladen (Datenbank + Bilder, im laufenden Betrieb) bzw. ein ZIP wieder einspielen.
+
+## Backup
+
+- **In der App:** ⚙ Optionen → Backup → *Backup herunterladen* / *Backup einspielen*.
+  Beim Einspielen wird der bisherige Stand auf dem Server nach `data/vor-restore-<Zeitpunkt>/` verschoben
+  (die letzten 3 bleiben erhalten) – ein Fehlgriff lässt sich so rückgängig machen.
+  Maximale Backup-Größe: 1 GB (`MAX_BACKUP_MB` im Backend, `client_max_body_size` in `nginx.conf`).
+- **Von Hand:** Container stoppen, den Ordner `data/` kopieren, Container starten. Nicht `geo.db` im laufenden
+  Betrieb kopieren – dann fehlen evtl. Änderungen aus `geo.db-wal`.
+- **Proxmox:** den Docker-LXC in die Proxmox-Backups aufnehmen (Snapshot-Modus).
+- Die App hat keinen Login: Wer sie erreicht, kann auch ein Backup einspielen. Nur geschützt (VPN / Proxy mit Login) freigeben.
 - **Kontinente:** In der Weltansicht oben *Europa*, *Asien* … wählen → Karte zoomt hin, andere Länder werden
   abgedunkelt. Die Auswahl bleibt gespeichert (auch nach Rückkehr aus einem Land).
 - **Welt-Infografik:** oben *🗺 Infografik: Kategorie* wählen → jedes Land mit einem **landesweiten** Meta dieser

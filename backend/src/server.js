@@ -2,16 +2,21 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { openDb } from './db.js';
+import { ZipWriter, readZip } from './zip.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve('data');
 const DB_FILE = process.env.DB_FILE ?? path.join(DATA_DIR, 'geo.db');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ?? path.join(DATA_DIR, 'uploads');
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024;
+const MAX_BACKUP_BYTES = Number(process.env.MAX_BACKUP_MB ?? 1024) * 1024 * 1024;
+const KEEP_RESTORE_POINTS = 3; // so viele automatische Sicherungen vor dem Einspielen bleiben erhalten
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-const db = openDb(DB_FILE);
+// let: wird beim Einspielen eines Backups neu geöffnet
+let db = openDb(DB_FILE);
 
 const IMAGE_TYPES = {
   'image/jpeg': '.jpg',
@@ -252,6 +257,37 @@ function setMembers(regionId, refs) {
   for (const ref of refs) insert.run(regionId, ref);
 }
 
+// ---------- Backup ----------
+
+/** Handler hat die Antwort selbst geschrieben (z.B. Datei-Download) */
+const RAW = Symbol('raw');
+
+/** Konsistente Kopie der laufenden Datenbank (inkl. WAL) als Buffer */
+function snapshotDb() {
+  const tmp = path.join(path.dirname(DB_FILE), `.snapshot-${process.pid}-${Date.now()}.db`);
+  try {
+    db.exec(`VACUUM INTO '${tmp.replaceAll("'", "''")}'`);
+    return fs.readFileSync(tmp);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+function listUploads() {
+  return fs.readdirSync(UPLOAD_DIR, { withFileTypes: true })
+    .filter((e) => e.isFile() && EXT_TO_TYPE[path.extname(e.name).toLowerCase()])
+    .map((e) => e.name);
+}
+
+function restorePoints() {
+  return fs.readdirSync(DATA_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith('vor-restore-'))
+    .map((e) => e.name)
+    .sort();
+}
+
+const isSqlite = (buf) => buf.subarray(0, 16).toString('latin1') === 'SQLite format 3\0';
+
 // ---------- Routen ----------
 
 const routes = [];
@@ -327,6 +363,113 @@ route('DELETE', '/api/categories/:id', async ({ req, params }) => {
     db.prepare('DELETE FROM categories WHERE id = ?').run(id);
   });
   return [204, null];
+});
+
+// Übersicht für den Backup-Tab
+route('GET', '/api/backup/info', () => {
+  const uploads = listUploads();
+  const size = (f) => fs.statSync(f).size;
+  const dbBytes = ['', '-wal'].reduce((a, suf) => a + (fs.existsSync(DB_FILE + suf) ? size(DB_FILE + suf) : 0), 0);
+  return {
+    metas: db.prepare('SELECT COUNT(*) AS n FROM metas').get().n,
+    countries: db.prepare('SELECT COUNT(DISTINCT country_iso) AS n FROM metas').get().n,
+    db_bytes: dbBytes,
+    images: uploads.length,
+    image_bytes: uploads.reduce((a, f) => a + size(path.join(UPLOAD_DIR, f)), 0),
+    restore_points: restorePoints(),
+  };
+});
+
+// Backup herunterladen: ZIP mit geo.db (konsistente Kopie) + uploads/
+route('GET', '/api/backup', async ({ res }) => {
+  const dbData = snapshotDb();
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.writeHead(200, {
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="geoguessr-helper-backup-${stamp}.zip"`,
+    'Cache-Control': 'no-store',
+  });
+  const zip = new ZipWriter(res);
+  await zip.add('geo.db', dbData, { compress: true });
+  for (const name of listUploads()) {
+    // Bilder sind schon komprimiert → unverändert speichern
+    await zip.add(`uploads/${name}`, await fs.promises.readFile(path.join(UPLOAD_DIR, name)), { compress: false });
+  }
+  await zip.finish();
+  return RAW;
+});
+
+// Backup einspielen: Body = ZIP. Der aktuelle Stand wird vorher nach data/vor-restore-<Zeit>/ verschoben.
+route('POST', '/api/backup', async ({ req }) => {
+  const buf = await readBody(req, MAX_BACKUP_BYTES);
+  let entries;
+  try {
+    entries = readZip(buf, { maxEntryBytes: MAX_BACKUP_BYTES });
+  } catch (e) {
+    throw new HttpError(400, e.message);
+  }
+  const dbEntry = entries.find((e) => e.name === 'geo.db');
+  if (!dbEntry) throw new HttpError(400, 'Im Backup fehlt geo.db – ist das ein Backup dieser App?');
+  const dbData = dbEntry.read();
+  if (!isSqlite(dbData)) throw new HttpError(400, 'geo.db im Backup ist keine SQLite-Datenbank');
+
+  // 1. Neue Datenbank prüfen (lässt sie sich öffnen, gibt es die Tabelle metas?)
+  const dbDir = path.dirname(DB_FILE);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const tmpDb = path.join(dbDir, `.restore-${stamp}.db`);
+  fs.writeFileSync(tmpDb, dbData);
+  let metaCount;
+  try {
+    const test = new DatabaseSync(tmpDb);
+    try {
+      metaCount = test.prepare('SELECT COUNT(*) AS n FROM metas').get().n;
+    } finally {
+      test.close();
+    }
+  } catch {
+    fs.rmSync(tmpDb, { force: true });
+    throw new HttpError(400, 'Die Datenbank im Backup ist unvollständig oder beschädigt');
+  }
+
+  // 2. Bilder in einen neuen Ordner entpacken (nur erlaubte Bilddateien, keine Pfade)
+  const newUploads = `${UPLOAD_DIR}.new-${stamp}`;
+  fs.mkdirSync(newUploads, { recursive: true });
+  let images = 0;
+  try {
+    for (const e of entries) {
+      if (!e.name.startsWith('uploads/')) continue;
+      const name = path.basename(e.name);
+      if (!EXT_TO_TYPE[path.extname(name).toLowerCase()] || name.startsWith('.')) continue;
+      fs.writeFileSync(path.join(newUploads, name), e.read());
+      images++;
+    }
+  } catch (e) {
+    fs.rmSync(newUploads, { recursive: true, force: true });
+    fs.rmSync(tmpDb, { force: true });
+    throw new HttpError(400, e.message);
+  }
+
+  // 3. Austauschen: alten Stand sichern, neuen einsetzen, DB neu öffnen
+  const safety = path.join(DATA_DIR, `vor-restore-${stamp}`);
+  fs.mkdirSync(safety, { recursive: true });
+  db.close();
+  try {
+    for (const suf of ['', '-wal', '-shm']) {
+      if (fs.existsSync(DB_FILE + suf)) fs.renameSync(DB_FILE + suf, path.join(safety, path.basename(DB_FILE) + suf));
+    }
+    fs.renameSync(tmpDb, DB_FILE);
+    if (fs.existsSync(UPLOAD_DIR)) fs.renameSync(UPLOAD_DIR, path.join(safety, 'uploads'));
+    fs.renameSync(newUploads, UPLOAD_DIR);
+  } finally {
+    db = openDb(DB_FILE); // auch bei Fehlern wieder eine Datenbank öffnen (Migrationen laufen dabei mit)
+  }
+
+  // Nur die neuesten Sicherungen behalten
+  const points = restorePoints();
+  for (const old of points.slice(0, Math.max(0, points.length - KEEP_RESTORE_POINTS))) {
+    fs.rmSync(path.join(DATA_DIR, old), { recursive: true, force: true });
+  }
+  return { ok: true, metas: metaCount, images, saved_as: path.basename(safety) };
 });
 
 // ---------- Einstellungen ----------
@@ -589,6 +732,7 @@ const server = http.createServer(async (req, res) => {
       if (!match) continue;
       const params = Object.fromEntries(r.keys.map((k, i) => [k, match[i + 1]]));
       const result = await r.handler({ req, res, params, url });
+      if (result === RAW) return;
       const [status, data] = Array.isArray(result) && typeof result[0] === 'number' && result.length === 2
         ? result
         : [200, result];
@@ -605,6 +749,7 @@ const server = http.createServer(async (req, res) => {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(err);
     if (!res.headersSent) sendJson(res, status, { error: err.message ?? 'Fehler' });
+    else res.destroy(); // z.B. Abbruch mitten im Download
   }
 });
 

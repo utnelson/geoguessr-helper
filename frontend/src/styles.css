@@ -494,3 +494,10 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .country-bar-title .muted { font-size: 0.82rem; }
 .sidebar-toggle { margin-left: auto; }
 .map-col > .group-bar { background: var(--surface); }
+
+/* ---------- Backup ---------- */
+.options-h { margin: 14px 0 2px; font-size: 0.95rem; }
+.drawer a.btn { display: inline-block; text-align: center; text-decoration: none; }
+.btn.danger-solid { background: #8f2d2d; border-color: #b53b3b; color: #fff; font-weight: 600; }
+.success { color: var(--green); margin: 8px 0 0; }
+.modal input[type='file'] { padding: 6px; }

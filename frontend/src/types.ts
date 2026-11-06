@@ -110,3 +110,13 @@ export interface InfoItem {
   /** fester Ankerpunkt [lng, lat] (sonst aus den Regionen berechnet) */
   anchor?: [number, number];
 }
+
+export interface BackupInfo {
+  metas: number;
+  countries: number;
+  db_bytes: number;
+  images: number;
+  image_bytes: number;
+  /** automatische Sicherungen vor dem letzten Einspielen (Ordner in data/) */
+  restore_points: string[];
+}

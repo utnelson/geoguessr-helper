@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { CONTINENTS } from '../geo';
-import type { Category, CountryInfo } from '../types';
+import type { BackupInfo, Category, CountryInfo } from '../types';
 
 interface Props {
   countries: Map<string, CountryInfo>;
@@ -18,7 +18,7 @@ const continentName = (id: string) => CONTINENT_NAMES[id] ?? (id === 'Antarctica
 
 /** Optionen: Länder ein-/ausschalten, Kategorien verwalten */
 export function OptionsDrawer({ countries, disabled, stats, onDisabledChange, categories, onCategoriesChanged, onClose }: Props) {
-  const [tab, setTab] = useState<'countries' | 'categories'>('countries');
+  const [tab, setTab] = useState<'countries' | 'categories' | 'backup'>('countries');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -36,12 +36,11 @@ export function OptionsDrawer({ countries, disabled, stats, onDisabledChange, ca
         <div className="tabs">
           <button className={`tab ${tab === 'countries' ? 'active' : ''}`} onClick={() => setTab('countries')}>Länder</button>
           <button className={`tab ${tab === 'categories' ? 'active' : ''}`} onClick={() => setTab('categories')}>Kategorien</button>
+          <button className={`tab ${tab === 'backup' ? 'active' : ''}`} onClick={() => setTab('backup')}>Backup</button>
         </div>
-        {tab === 'countries' ? (
-          <CountriesTab countries={countries} disabled={disabled} stats={stats} onChange={onDisabledChange} />
-        ) : (
-          <CategoriesTab categories={categories} onChanged={onCategoriesChanged} />
-        )}
+        {tab === 'countries' && <CountriesTab countries={countries} disabled={disabled} stats={stats} onChange={onDisabledChange} />}
+        {tab === 'categories' && <CategoriesTab categories={categories} onChanged={onCategoriesChanged} />}
+        {tab === 'backup' && <BackupTab />}
       </div>
     </aside>
   );
@@ -215,6 +214,74 @@ function CategoriesTab({ categories, onChanged }: { categories: Category[]; onCh
         <button type="button" className="btn primary" onClick={add}>Anlegen</button>
       </div>
       {error && <p className="error">{error}</p>}
+    </>
+  );
+}
+
+// ---------- Backup ----------
+
+const mb = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+
+function BackupTab() {
+  const [info, setInfo] = useState<BackupInfo | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    api.backupInfo().then(setInfo).catch((e) => setMessage({ ok: false, text: (e as Error).message }));
+  }, []);
+
+  const restore = async () => {
+    if (!file) return;
+    const ok = confirm(
+      `Backup „${file.name}“ einspielen?
+
+Alle aktuellen Metas, Bilder, Gruppen und Einstellungen werden ersetzt. ` +
+        'Der jetzige Stand wird vorher auf dem Server in einem Ordner „vor-restore-…“ gesichert.',
+    );
+    if (!ok) return;
+    setMessage(null);
+    setProgress(0);
+    try {
+      const r = await api.restoreBackup(file, setProgress);
+      setMessage({ ok: true, text: `Eingespielt: ${r.metas} Metas, ${r.images} Bilder. Seite wird neu geladen…` });
+      setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+      setMessage({ ok: false, text: (e as Error).message });
+      setProgress(null);
+    }
+  };
+
+  return (
+    <>
+      <h3 className="options-h">Backup herunterladen</h3>
+      <p className="muted small-hint">
+        ZIP-Datei mit der Datenbank (Metas, Kategorien, Regionen, Gruppen, Einstellungen) und allen Bildern.
+        Kann im laufenden Betrieb erstellt werden.
+      </p>
+      {info && (
+        <p className="small-hint">
+          {info.metas} Metas in {info.countries} Ländern · Datenbank {mb(info.db_bytes)} · {info.images} Bilder ({mb(info.image_bytes)})
+        </p>
+      )}
+      <a className="btn primary" href="/api/backup" download>⬇ Backup herunterladen</a>
+
+      <h3 className="options-h">Backup einspielen</h3>
+      <p className="muted small-hint">
+        Ersetzt <strong>alle</strong> aktuellen Daten durch das Backup. Der bisherige Stand wird auf dem Server vorher in
+        <code> data/vor-restore-…</code> gesichert (die letzten 3 bleiben erhalten).
+      </p>
+      <input type="file" accept=".zip,application/zip" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setMessage(null); }} />
+      <button className="btn danger-solid" disabled={!file || progress !== null} onClick={restore}>
+        {progress === null ? '⬆ Backup einspielen' : progress < 1 ? `Lade hoch… ${Math.round(progress * 100)} %` : 'Spiele ein…'}
+      </button>
+      {message && <p className={message.ok ? 'success' : 'error'}>{message.text}</p>}
+      {info && info.restore_points.length > 0 && (
+        <p className="muted small-hint">
+          Automatische Sicherungen auf dem Server: {info.restore_points.map((p) => p.replace('vor-restore-', '')).join(', ')}
+        </p>
+      )}
     </>
   );
 }

@@ -1,4 +1,4 @@
-import type { Category, Meta, MetaImage, MetaInput, Region, RegionGroup, Settings } from './types';
+import type { BackupInfo, Category, Meta, MetaImage, MetaInput, Region, RegionGroup, Settings } from './types';
 
 export interface GroupInput {
   name: string;
@@ -34,6 +34,28 @@ export const api = {
   /** moveTo: Zielkategorie für die Metas einer genutzten Kategorie */
   deleteCategory: (id: number, moveTo?: number) =>
     request<void>(`/api/categories/${id}`, json('DELETE', moveTo ? { move_to: moveTo } : {})),
+
+  backupInfo: () => request<BackupInfo>('/api/backup/info'),
+  /** ZIP hochladen und einspielen; onProgress: 0..1 (Upload-Fortschritt) */
+  restoreBackup: (file: File, onProgress: (p: number) => void) =>
+    new Promise<{ metas: number; images: number; saved_as: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/backup');
+      xhr.setRequestHeader('Content-Type', 'application/zip');
+      xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+      xhr.onload = () => {
+        let body: { error?: string } & Record<string, unknown> = {};
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          /* kein JSON */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as never);
+        else reject(new Error(body.error ?? (xhr.status === 413 ? 'Datei zu groß' : `HTTP ${xhr.status}`)));
+      };
+      xhr.onerror = () => reject(new Error('Verbindung abgebrochen'));
+      xhr.send(file);
+    }),
 
   settings: () => request<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => request<Settings>('/api/settings', json('PUT', s)),
