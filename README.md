@@ -85,8 +85,9 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 
 ## Bedienung
 
-- Land anklicken oder oben suchen → Zoom + Meta-Panel als **Seitenleiste rechts**. Mit **⟩** einklappen
-  (volle Kartenbreite), mit dem Reiter am rechten Rand wieder öffnen. Der Link (`#DE`) ist teilbar/bookmarkbar.
+- Land anklicken oder oben suchen → Zoom + Meta-Panel als **Seitenleiste rechts**. Über der Karte steht die
+  **Länderleiste** (← Welt, Flagge, Name, Anzahl Metas, *Seitenleiste ⟩* zum Ein-/Ausklappen), darunter – falls
+  vorhanden – die **Regionsgruppen**. Der Link (`#DE`) ist teilbar/bookmarkbar.
 - Meta- und Gruppenformulare öffnen sich ebenfalls in der Seitenleiste – die Karte bleibt sichtbar.
   Der **Titel ist optional**; ein Meta braucht nur Titel, Beschreibung oder ein Bild.
 - **⚙ Optionen** (oben rechts):

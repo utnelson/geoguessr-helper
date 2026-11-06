@@ -4,6 +4,7 @@ import { CONTINENTS, GROUP_COLORS, loadCountries, loadRegions, type CountryColle
 import type { Category, CountryInfo, InfoItem, Meta, RegionGroup } from './types';
 import { WorldMap } from './components/WorldMap';
 import { CountryPanel } from './components/CountryPanel';
+import { CountryBar, GroupBar } from './components/CountryBar';
 import { MetaForm } from './components/MetaForm';
 import { GroupForm } from './components/GroupForm';
 import { OptionsDrawer } from './components/OptionsDrawer';
@@ -350,30 +351,18 @@ export default function App() {
       )}
 
       <div className={`main ${country && !sidebarCollapsed ? 'with-sidebar' : ''}`}>
-      {country && sidebarCollapsed && (
-        <button className="sidebar-expand" onClick={() => setSidebarCollapsed(false)} title="Seitenleiste einblenden">
-          ⟨ <span>{country.name}</span>
-        </button>
-      )}
       {country && !sidebarCollapsed && (
         <CountryPanel
-          onCollapse={() => setSidebarCollapsed(true)}
           country={country}
           metas={metas}
           loading={loadingMetas}
           categories={categories}
-          onClose={() => select(null)}
           regions={regions}
           regionCounts={regionCounts}
           selectedRegions={selectedRegions}
           onSelectRegions={selectRegions}
           metaRefs={metaRefs}
-          groups={groups}
           activeGroup={activeGroup}
-          suggestedGroupCount={groups.length === 0 ? suggestedGroups.length : 0}
-          onSuggestGroups={applySuggestedGroups}
-          onNewGroup={() => setGroupEditing({ group: null, members: selectedRegions })}
-          onEditGroup={(g) => setGroupEditing({ group: g, members: g.members })}
           infoCategory={infoCategory}
           onInfographic={setInfoCategory}
           onAdd={() =>
@@ -389,6 +378,29 @@ export default function App() {
         />
       )}
 
+      {/* Kartenspalte: bei geöffnetem Land oben Länder- und Gruppenleiste */}
+      <div className="map-col">
+      {country && (
+        <CountryBar
+          country={country}
+          metas={metas}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+          onBack={() => select(null)}
+        />
+      )}
+      {country && regions && regions.size > 0 && (
+        <GroupBar
+          groups={groups}
+          activeGroup={activeGroup}
+          selectedRegions={selectedRegions}
+          onSelectRegions={selectRegions}
+          onNewGroup={() => setGroupEditing({ group: null, members: selectedRegions })}
+          onEditGroup={(g) => setGroupEditing({ group: g, members: g.members })}
+          suggestedGroupCount={groups.length === 0 ? suggestedGroups.length : 0}
+          onSuggestGroups={applySuggestedGroups}
+        />
+      )}
       {geo ? (
         <WorldMap
           geojson={geo.geojson}
@@ -410,6 +422,7 @@ export default function App() {
       ) : (
         <div className="map-wrap loading">Lade Karte…</div>
       )}
+      </div>
 
       {editing && country && (
         <MetaForm

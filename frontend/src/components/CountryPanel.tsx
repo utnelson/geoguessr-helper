@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Category, CountryInfo, Meta, RegionGroup, RegionInfo } from '../types';
-import { flagUrl } from '../geo';
 
 interface Props {
   country: CountryInfo;
@@ -14,19 +13,11 @@ interface Props {
   onSelectRegions: (refs: string[]) => void;
   /** admin1-Regionen eines Metas (Gruppen aufgelöst) */
   metaRefs: (m: Meta) => string[];
-  groups: RegionGroup[];
   /** Gruppe, die genau der aktuellen Auswahl entspricht */
   activeGroup: RegionGroup | null;
-  /** > 0: Natural Earth schlägt so viele Gruppen vor (nur wenn noch keine existieren) */
-  suggestedGroupCount: number;
-  onSuggestGroups: () => void;
-  onNewGroup: () => void;
-  onEditGroup: (g: RegionGroup) => void;
   /** Kategorie der Infografik-Ansicht (null = aus) */
   infoCategory: number | null;
   onInfographic: (categoryId: number | null) => void;
-  onClose: () => void;
-  onCollapse: () => void;
   onAdd: () => void;
   onEdit: (m: Meta) => void;
   onDelete: (m: Meta) => void;
@@ -45,11 +36,9 @@ function groupByCategory(list: Meta[]): [string, Meta[]][] {
 
 export function CountryPanel({
   country, metas, loading, categories, regions, regionCounts, selectedRegions, onSelectRegions, metaRefs,
-  groups, activeGroup, suggestedGroupCount, onSuggestGroups, onNewGroup, onEditGroup, infoCategory, onInfographic,
-  onClose, onCollapse, onAdd, onEdit, onDelete, onOpenImage,
+  activeGroup, infoCategory, onInfographic, onAdd, onEdit, onDelete, onOpenImage,
 }: Props) {
   const [filter, setFilter] = useState<number | 'all'>(infoCategory ?? 'all');
-  const flag = flagUrl(country.iso);
   const hasSelection = selectedRegions.length > 0;
   const regionName = (ref: string) => regions?.get(ref)?.name ?? ref;
   const metaRegionName = (r: Meta['regions'][number]) => (r.ref && regions?.get(r.ref)?.name) || r.name;
@@ -91,11 +80,6 @@ export function CountryPanel({
     [regions],
   );
 
-  const clickGroup = (g: RegionGroup, e: MouseEvent) => {
-    if (e.ctrlKey || e.metaKey || e.shiftKey) onSelectRegions([...new Set([...selectedRegions, ...g.members])]);
-    else onSelectRegions(g.members);
-  };
-
   const renderCards = (list: Meta[], showRegions: boolean) => (
     <div className="cards">
       {list.map((m) => (
@@ -128,16 +112,6 @@ export function CountryPanel({
   return (
     <section className="panel">
       <header className="panel-head">
-        <button className="btn ghost" onClick={onClose} title="Zurück zur Weltkarte">← Welt</button>
-        <button className="btn ghost collapse-btn" onClick={onCollapse} title="Seitenleiste einklappen – mehr Platz für die Karte">⟩</button>
-        {flag && <img className="flag" src={flag} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />}
-        <div className="panel-title">
-          <h2>{country.name}</h2>
-          <small>
-            {country.iso} · {country.continent} · {generalCount} Metas
-            {regionalCount > 0 && ` · ${regionalCount} Regionen-Metas`}
-          </small>
-        </div>
         {regionList.length > 0 && (
           <select
             className="region-select"
@@ -179,35 +153,6 @@ export function CountryPanel({
             : selectedRegions.length > 1 ? `+ Meta für ${selectedRegions.length} Regionen` : hasSelection ? '+ Regionen-Meta' : '+ Meta'}
         </button>
       </header>
-
-      {regionList.length > 0 && (
-        <div className="group-bar">
-          <span className="muted">Gruppen:</span>
-          {groups.map((g) => (
-            <span key={g.id} className={`group-chip ${activeGroup?.id === g.id ? 'active' : ''}`} style={{ ['--c' as string]: g.color ?? '#888' }}>
-              <button className="group-chip-name" onClick={(e) => clickGroup(g, e)} title={`${g.members.length} Regionen – Strg+Klick: dazunehmen`}>
-                <i />{g.name}
-              </button>
-              <button className="group-chip-edit" onClick={() => onEditGroup(g)} title="Gruppe bearbeiten">✎</button>
-            </span>
-          ))}
-          {groups.length === 0 && <span className="muted">noch keine</span>}
-          {hasSelection && !activeGroup && (
-            <button className="btn ghost small" onClick={onNewGroup}>+ Gruppe aus Auswahl ({selectedRegions.length})</button>
-          )}
-          {!hasSelection && groups.length > 0 && (
-            <span className="muted small-hint">Strg+Klick auf Regionen → „+ Gruppe aus Auswahl“</span>
-          )}
-          {suggestedGroupCount > 0 && (
-            <button className="btn ghost small" onClick={onSuggestGroups} title="Gruppen aus Natural Earth übernehmen (danach anpassbar)">
-              ✨ {suggestedGroupCount} Gruppen vorschlagen
-            </button>
-          )}
-          {groups.length === 0 && !hasSelection && suggestedGroupCount === 0 && (
-            <span className="muted small-hint">Regionen mit Strg+Klick markieren → „+ Gruppe aus Auswahl“</span>
-          )}
-        </div>
-      )}
 
       {infoCat && (
         <div className="info-bar">
