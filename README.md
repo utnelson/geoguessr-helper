@@ -6,6 +6,10 @@ mit Text und Bildern.
 
 ## Starten (Docker)
 
+Der Stack besteht aus drei Containern: `frontend` (nginx), `backend` (Node) und `vision` (Bilderkennung,
+optional – ~1,5 GB RAM, beim ersten Build ~2–3 GB Download für PyTorch, CLIP-Modell und Tesseract-Sprachen).
+Ohne Bilderkennung: den `vision`-Block in `docker-compose.yml` auskommentieren.
+
 ```bash
 docker compose up -d --build
 ```
@@ -37,6 +41,7 @@ npm run typecheck                    # optional: TypeScript prüfen
 ## Aufbau
 
 ```
+vision/             Python (FastAPI): CLIP-Bildvektoren (open_clip, CPU) + OCR (Tesseract) – nur intern
 backend/            Node.js, nur Bordmittel (http + node:sqlite)
   src/db.js         Schema + Standard-Kategorien
   src/server.js     REST-API + Bild-Uploads
@@ -60,6 +65,9 @@ docker-compose.yml
 | PUT / DELETE | `/api/attributes/:id` | bearbeiten (`key`, `values`, `rename: { from, to }`) / löschen |
 | GET | `/api/attribute-values` | alle vergebenen Merkmale `{ meta_id, country_iso, attribute_id, value }` (Rückwärtssuche) |
 | GET | `/api/search?q=` | Volltextsuche über Metas (Titel, Text, Kategorie, Regionen/Gruppen, Merkmale) |
+| GET | `/api/vision/status` | Bilderkennung verfügbar? Wie viele Bilder sind indexiert? |
+| POST | `/api/vision/similar` | Body = Bild → ähnlichste Meta-Bilder (CLIP) + Länder-Rangliste |
+| POST | `/api/vision/ocr` | Body = Bild → erkannter Text, Schrift, Länder-Vorschläge |
 | GET / PUT | `/api/settings` | Einstellungen, z.B. `{ disabled_countries: ["AQ", …] }` |
 | GET | `/api/backup` | Backup als ZIP herunterladen (`geo.db` + `uploads/`) |
 | POST | `/api/backup` | Backup einspielen, Body = ZIP (alter Stand → `data/vor-restore-…`) |
@@ -131,6 +139,16 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 - **Volltextsuche** (Suchfeld oben): findet Länder und Metas – Titel, Beschreibung, Kategorie, Regionen/Gruppen
   und Merkmale, Wortanfänge reichen, Umlaute egal (`waffel`, `gelbe kenn`, `kansai`). Länder mit Treffern werden
   auf der Karte markiert; Klick auf einen Treffer öffnet das Land und wählt das Meta aus. Pfeiltasten + Enter, Esc.
+- **📷 Bilderkennung** (Knopf *Bild* oben): Screenshot mit **Strg+V** einfügen (oder hineinziehen), optional einen
+  **Rahmen um das Interessante ziehen** (Mast, Poller, Schild …), dann
+  - **🔍 Ähnliche Bilder** (CLIP): vergleicht mit allen Bildern deiner Metas → ähnlichste Bilder + wahrscheinlichste
+    Länder (Top 5 auf der Karte markiert). Klick auf ein Bild öffnet das Meta. Wird besser, je mehr Bilder du sammelst.
+  - **🔤 Schrift lesen** (OCR, Tesseract): erkennt das Schriftsystem (Latein, Kyrillisch, Griechisch, Thai, Hangul …),
+    liest den Text mit jedem passenden Sprachmodell einzeln und bestimmt daraus die **vermutliche Sprache**
+    (die sicherste Lesart, die typische Zeichen ihrer Sprache enthält). Länder-Vorschläge kommen aus Schriftsystem und
+    verräterischen Sonderzeichen (ő → Ungarn, ł → Polen, ř → Tschechien, ğ/ı → Türkei, ș/ț → Rumänien, ї → Ukraine …).
+    Tabellen: `backend/src/ocrHints.js`. Tipp: Rahmen eng um das Schild ziehen – das verbessert die Erkennung deutlich.
+  Neue Bilder werden automatisch im Hintergrund indexiert (Fortschritt steht oben im Bilderkennungs-Fenster).
 - **Kontinente:** In der Weltansicht oben *Europa*, *Asien* … wählen → Karte zoomt hin, andere Länder werden
   abgedunkelt. Die Auswahl bleibt gespeichert (auch nach Rückkehr aus einem Land).
 - **Kategorie-Leiste** (🗺 Kategorie, unter den Kontinenten bzw. unter den Gruppen): Klick auf eine Kategorie
@@ -179,9 +197,8 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
    - ✅ Bereiche je Meta mit dem Pinsel einzeichnen (`metas.area`, GeoJSON MultiPolygon)
 3. ✅ Merkmale pro Kategorie + **Rückwärtssuche** („Mast mit Waffelmuster“ → passende Länder auf der Karte)
    und **Volltextsuche** (SQLite FTS5)
-4. **Bilderkennung** als zusätzliche Container-Dienste:
-   - **Bild-Ähnlichkeitssuche (CLIP, z.B. OpenCLIP)**: Screenshot eines Masts/Pollers/Schilds einfügen →
-     ähnlichste Bilder aus den eigenen Metas → Länder. Embeddings der Meta-Bilder beim Upload berechnen.
-   - **OCR (Tesseract / PaddleOCR)**: Schrift auf Schildern erkennen → Schriftsystem und typische
-     Sonderzeichen (ğ, ő, ł, ß …) → passende Länder vorschlagen bzw. als Filter übernehmen.
+4. ✅ **Bilderkennung** (Container `vision`): CLIP-Ähnlichkeitssuche über die eigenen Meta-Bilder und OCR mit
+   Länder-Vorschlägen aus Schrift/Sonderzeichen
+   - Ideen: OCR-Wörter in die Volltextsuche übernehmen, Sprach-Erkennung über Wortlisten (z.B. „ulica“, „utca“),
+     CLIP-Textsuche („yellow bollard with red reflector“)
 5. Lernmodus: Quiz (Bild → Land auf Karte klicken), Karteikarten mit Spaced Repetition, Statistik

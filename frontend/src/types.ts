@@ -190,3 +190,44 @@ export interface SearchHit {
   /** Ausschnitt; Treffer sind mit  …  markiert */
   snippet: string;
 }
+
+// ---------- Bilderkennung ----------
+
+export interface VisionStatus {
+  configured: boolean;
+  available: boolean;
+  model: string | null;
+  total: number;
+  indexed: number;
+  indexing: boolean;
+}
+
+export interface SimilarImage {
+  image_id: number;
+  url: string;
+  meta_id: number;
+  country_iso: string;
+  title: string;
+  category_name: string;
+  /** Kosinus-Ähnlichkeit (CLIP), ~0.5 = kaum ähnlich, >0.85 = sehr ähnlich */
+  score: number;
+}
+
+export interface SimilarResult {
+  model: string;
+  indexed: number;
+  images: SimilarImage[];
+  countries: { iso: string; best: number; hits: number; score: number }[];
+}
+
+export interface OcrResult {
+  script: string | null;
+  script_conf: number;
+  text: string;
+  /** weitere gute Lesarten (je Sprachmodell) */
+  variants: { lang: string; confidence: number; text: string }[];
+  hints: { iso: string; score: number; reasons: string[] }[];
+  /** vermutlich gelesene Sprache (aus den Sonderzeichen der Lesarten), null = unklar */
+  language: { code: string; name: string; confidence: number } | null;
+  ms: number;
+}

@@ -734,3 +734,32 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
 /* Seitenleiste: zu den Filtern passende Metas */
 .card.filter-match { border-color: #20c997; }
 .card-match { font-size: 0.75rem; color: #20c997; font-weight: 600; margin-bottom: 2px; }
+
+/* ---------- Bilderkennung ---------- */
+.vision-status { margin: 0; }
+.vision-drop { padding: 40px 16px; }
+.vision-image { position: relative; cursor: crosshair; user-select: none; touch-action: none; border-radius: 8px; overflow: hidden; background: #000; }
+.vision-image img { display: block; width: 100%; height: auto; max-height: 45vh; object-fit: contain; }
+.vision-rect { position: absolute; border: 2px solid var(--accent); background: rgba(244, 180, 0, 0.15); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45); pointer-events: none; }
+.vision-tools { align-items: center; flex-wrap: wrap; }
+.vision-actions .btn { flex: 1; }
+.vision-result { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
+.vision-result h3 { margin: 4px 0 8px; font-size: 0.95rem; }
+.vision-countries { display: flex; flex-direction: column; gap: 4px; }
+.vision-country {
+  display: flex; align-items: center; gap: 8px; text-align: left; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; cursor: pointer;
+}
+.vision-country:hover { border-color: #20c997; }
+.vision-country .rank { color: var(--muted); width: 1.6em; }
+.vision-country .bar { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.vision-country .bar i { display: block; height: 100%; background: #20c997; }
+.ocr-reasons { margin-left: auto; color: var(--accent); font-weight: 600; letter-spacing: 0.05em; }
+.vision-images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+.vision-images figure { margin: 0; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.vision-images img { width: 100%; height: 80px; object-fit: cover; display: block; cursor: zoom-in; }
+.vision-images figcaption { font-size: 0.72rem; padding: 2px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ocr-text { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.85rem; margin: 0 0 8px; }
+.ocr-variants { margin-bottom: 8px; }
+.ocr-variants div { padding: 2px 0; }
+.ocr-lang { color: #20c997; font-weight: 600; }

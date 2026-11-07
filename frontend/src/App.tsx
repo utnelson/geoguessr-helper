@@ -9,6 +9,7 @@ import type {
 import { computeFilter } from './filters';
 import { SearchBox } from './components/SearchBox';
 import { ActiveFilterBar, FilterPanel } from './components/FilterPanel';
+import { VisionDrawer } from './components/VisionDrawer';
 import { WorldMap, type DrawApi } from './components/WorldMap';
 import { CountryPanel } from './components/CountryPanel';
 import { CategoryBar, CountryBar, GroupBar } from './components/CountryBar';
@@ -67,6 +68,9 @@ export default function App() {
   // Volltextsuche: Länder mit Treffern (Kartenmarkierung) und Meta, das nach dem Öffnen ausgewählt wird
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null);
   const [pendingMetaId, setPendingMetaId] = useState<number | null>(null);
+  // Bilderkennung (CLIP/OCR): Drawer + vorgeschlagene Länder auf der Karte
+  const [visionOpen, setVisionOpen] = useState(false);
+  const [visionMarks, setVisionMarks] = useState<Set<string> | null>(null);
 
   const refreshStats = useCallback(async () => {
     const s = await api.stats();
@@ -290,12 +294,14 @@ export default function App() {
     const isos = [...geo.countries.keys()].filter((iso) => !disabled.has(iso));
     return computeFilter(attributeRows, filters, isos);
   }, [geo, filters, attributeRows, disabled]);
-  // Karte: Filter-Status je Land – sonst Treffer der Volltextsuche
+  // Karte: Filter-Status je Land – sonst Vorschläge der Bilderkennung oder Treffer der Volltextsuche
+  const markHits = visionMarks ?? searchHits;
   const countryMarks = useMemo<Map<string, FilterStatus> | null>(() => {
     if (filterResult) return filterResult.status;
-    if (searchHits) return new Map([...searchHits].map((iso) => [iso, 'match' as const]));
+    if (markHits) return new Map([...markHits].map((iso) => [iso, 'match' as const]));
     return null;
-  }, [filterResult, searchHits]);
+  }, [filterResult, markHits]);
+  const marksLabel = filterResult ? null : visionMarks ? 'Vorschlag der Bilderkennung' : searchHits ? 'Treffer der Suche' : null;
 
   // Welt-Infografik: ein Kasten pro Land (bzw. Meta), Linie zum Land, Land in Kastenfarbe
   const worldInfographic = useMemo<InfoItem[] | null>(() => {
@@ -411,6 +417,16 @@ export default function App() {
             onHitsChange={setSearchHits}
           />
         )}
+        <button
+          className={`btn ${visionOpen ? 'primary' : 'ghost'}`}
+          onClick={() => {
+            setVisionOpen((v) => !v);
+            setOptionsOpen(false);
+          }}
+          title="Bilderkennung: Screenshot einfügen → ähnliche Bilder (CLIP) oder Schrift lesen (OCR)"
+        >
+          📷 Bild
+        </button>
         <button
           className={`btn ${filterOpen || filters.length ? 'primary' : 'ghost'} filter-toggle`}
           onClick={() => setFilterOpen((v) => !v)}
@@ -573,7 +589,7 @@ export default function App() {
           drawing={country ? drawing : null}
           drawApi={drawApi}
           marks={countryMarks}
-          marksFromSearch={!filterResult && !!searchHits}
+          marksLabel={marksLabel}
         />
       ) : (
         <div className="map-wrap loading">Lade Karte…</div>
@@ -614,6 +630,20 @@ export default function App() {
           onClose={() => setGroupEditing(null)}
           onSaved={onGroupSaved}
           onError={setError}
+        />
+      )}
+      {visionOpen && geo && (
+        <VisionDrawer
+          countries={geo.countries}
+          disabled={disabled}
+          onOpenCountry={(iso) => select(iso)}
+          onOpenMeta={(metaId, iso) => {
+            if (iso !== selectedIso) select(iso);
+            setPendingMetaId(metaId);
+          }}
+          onOpenImage={setLightbox}
+          onMarks={setVisionMarks}
+          onClose={() => setVisionOpen(false)}
         />
       )}
       {optionsOpen && geo && (

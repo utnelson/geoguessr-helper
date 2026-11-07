@@ -5,9 +5,21 @@ services:
     restart: unless-stopped
     environment:
       - MAX_UPLOAD_MB=20
+      # Bilderkennung (CLIP + OCR). Leer lassen bzw. Zeile entfernen, um sie auszuschalten.
+      - VISION_URL=http://vision:8000
     volumes:
       # SQLite-DB + hochgeladene Bilder – das hier sichern!
       - ./data:/data
+
+  # Bilderkennung: CLIP-Ähnlichkeitssuche + Tesseract-OCR (nur intern erreichbar).
+  # Braucht ~1,5 GB RAM und beim ersten Bauen ~2–3 GB Download. Wer das nicht will:
+  # diesen Block auskommentieren – der Rest der App läuft unverändert weiter.
+  vision:
+    build: ./vision
+    container_name: geoguessr-helper-vision
+    restart: unless-stopped
+    environment:
+      - TORCH_THREADS=2
 
   frontend:
     build: ./frontend

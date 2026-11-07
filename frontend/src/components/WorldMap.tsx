@@ -35,8 +35,8 @@ interface Props {
   disabled: Set<string>;
   /** Rückwärtssuche/Volltextsuche: Status je Land (null = keine Markierung) */
   marks: Map<string, FilterStatus> | null;
-  /** Markierung stammt aus der Volltextsuche (nur Treffer, keine Ausschlüsse) */
-  marksFromSearch: boolean;
+  /** Legenden-Text, wenn nur Treffer markiert sind (Volltextsuche/Bilderkennung); null = Filter-Legende */
+  marksLabel: string | null;
   /** eingezeichnete Meta-Bereiche, die gerade sichtbar sein sollen (ausgewähltes Meta, Infografik) */
   metaAreas: { id: number; color: string; geometry: MultiPolygon }[];
   /** Bereich des ausgewählten Metas → dorthin zoomen */
@@ -173,7 +173,7 @@ type Hover = { kind: 'country' | 'region'; id: string; name: string; sub?: strin
 export function WorldMap({
   geojson, countries, stats, selectedIso, onSelect, regionData, regionCounts, selectedRegions, onSelectRegions,
   infographic, onOpenImage, continent, showLabels, onToggleLabels, disabled, metaAreas, focusBBox, drawing, drawApi,
-  marks, marksFromSearch,
+  marks, marksLabel,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -710,8 +710,8 @@ export function WorldMap({
       )}
       {!infographic && <div className="map-legend">
         {marks ? (
-          marksFromSearch ? (
-            <span><i style={{ background: MATCH }} /> Treffer der Suche</span>
+          marksLabel ? (
+            <span><i style={{ background: MATCH }} /> {marksLabel}</span>
           ) : (
             <>
               <span><i style={{ background: MATCH }} /> passt</span>

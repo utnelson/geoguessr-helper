@@ -1,5 +1,6 @@
 import type {
-  Attribute, AttributeValueRow, BackupInfo, Category, Meta, MetaImage, MetaInput, Region, RegionGroup, SearchHit, Settings,
+  Attribute, AttributeValueRow, BackupInfo, Category, Meta, MetaImage, MetaInput, OcrResult, Region, RegionGroup, SearchHit,
+  Settings, SimilarResult, VisionStatus,
 } from './types';
 
 export interface GroupInput {
@@ -70,6 +71,13 @@ export const api = {
 
   /** Volltextsuche über Metas */
   search: (q: string) => request<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
+
+  // Bilderkennung (vision-Container)
+  visionStatus: () => request<VisionStatus>('/api/vision/status'),
+  similarImages: (img: Blob) =>
+    request<SimilarResult>('/api/vision/similar', { method: 'POST', headers: { 'Content-Type': img.type || 'image/png' }, body: img }),
+  ocr: (img: Blob) =>
+    request<OcrResult>('/api/vision/ocr', { method: 'POST', headers: { 'Content-Type': img.type || 'image/png' }, body: img }),
 
   settings: () => request<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => request<Settings>('/api/settings', json('PUT', s)),

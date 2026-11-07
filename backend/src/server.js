@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { openDb } from './db.js';
 import { ZipWriter, readZip } from './zip.js';
+import { hintsFromOcr } from './ocrHints.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve('data');
@@ -12,7 +13,10 @@ const DB_FILE = process.env.DB_FILE ?? path.join(DATA_DIR, 'geo.db');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ?? path.join(DATA_DIR, 'uploads');
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024;
 const MAX_BACKUP_BYTES = Number(process.env.MAX_BACKUP_MB ?? 1024) * 1024 * 1024;
-const KEEP_RESTORE_POINTS = 3; // so viele automatische Sicherungen vor dem Einspielen bleiben erhalten
+const KEEP_RESTORE_POINTS = 3;
+// Bilderkennung (vision-Container); leer = ausgeschaltet
+const VISION_URL = (process.env.VISION_URL ?? '').replace(/\/$/, '');
+const MAX_VISION_BYTES = 15 * 1024 * 1024; // so viele automatische Sicherungen vor dem Einspielen bleiben erhalten
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // let: wird beim Einspielen eines Backups neu geöffnet
@@ -367,6 +371,76 @@ function restorePoints() {
 
 const isSqlite = (buf) => buf.subarray(0, 16).toString('latin1') === 'SQLite format 3\0';
 
+// ---------- Bilderkennung (CLIP + OCR im vision-Container) ----------
+
+const vision = { model: null, error: null, indexing: false, lastCheck: 0 };
+
+async function callVision(pathname, body, type) {
+  if (!VISION_URL) throw new HttpError(503, 'Bilderkennung ist nicht eingerichtet (VISION_URL fehlt)');
+  let res;
+  try {
+    res = await fetch(VISION_URL + pathname, {
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': type || 'application/octet-stream' } : undefined,
+      body,
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (e) {
+    vision.error = 'vision-Container nicht erreichbar';
+    throw new HttpError(503, `Bilderkennung nicht erreichbar (${e.cause?.code ?? e.name})`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new HttpError(res.status === 400 ? 400 : 502, data.detail ?? `Bilderkennung: HTTP ${res.status}`);
+  vision.error = null;
+  return data;
+}
+
+async function checkVision() {
+  if (!VISION_URL) return null;
+  try {
+    const h = await callVision('/health');
+    vision.model = h.model;
+  } catch {
+    vision.model = null;
+  }
+  vision.lastCheck = Date.now();
+  return vision.model;
+}
+
+const toBlob = (vector) => Buffer.from(new Float32Array(vector).buffer);
+const fromBlob = (buf) => new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+
+/** Alle Bilder ohne (aktuellen) CLIP-Vektor nacheinander berechnen – läuft im Hintergrund */
+async function indexImages() {
+  if (!VISION_URL || vision.indexing) return;
+  vision.indexing = true;
+  try {
+    if (!(await checkVision())) return;
+    db.prepare('DELETE FROM image_embeddings WHERE model != ?').run(vision.model); // Modell gewechselt → neu
+    const todo = db
+      .prepare(
+        `SELECT i.id, i.filename FROM meta_images i
+         LEFT JOIN image_embeddings e ON e.image_id = i.id WHERE e.image_id IS NULL ORDER BY i.id`,
+      )
+      .all();
+    for (const img of todo) {
+      const file = path.join(UPLOAD_DIR, img.filename);
+      if (!fs.existsSync(file)) continue;
+      const type = EXT_TO_TYPE[path.extname(img.filename).toLowerCase()];
+      const { vector, model } = await callVision('/embed', await fs.promises.readFile(file), type);
+      // Bild könnte inzwischen gelöscht sein
+      if (db.prepare('SELECT 1 FROM meta_images WHERE id = ?').get(img.id)) {
+        db.prepare('INSERT OR REPLACE INTO image_embeddings (image_id, model, vector) VALUES (?, ?, ?)')
+          .run(img.id, model, toBlob(vector));
+      }
+    }
+  } catch (e) {
+    console.error('Bild-Index:', e.message);
+  } finally {
+    vision.indexing = false;
+  }
+}
+
 // ---------- Routen ----------
 
 const routes = [];
@@ -654,6 +728,64 @@ route('GET', '/api/search', ({ url }) => {
     .all(match);
 });
 
+// ---------- Bilderkennung ----------
+
+route('GET', '/api/vision/status', async () => {
+  if (VISION_URL && Date.now() - vision.lastCheck > 10_000) await checkVision();
+  const total = db.prepare('SELECT COUNT(*) AS n FROM meta_images').get().n;
+  const indexed = vision.model
+    ? db.prepare('SELECT COUNT(*) AS n FROM image_embeddings WHERE model = ?').get(vision.model).n
+    : 0;
+  if (vision.model && indexed < total) setTimeout(indexImages, 10);
+  return { configured: !!VISION_URL, available: !!vision.model, model: vision.model, total, indexed, indexing: vision.indexing };
+});
+
+// Ähnliche Bilder: Body = Bild (Screenshot/Ausschnitt) → ähnlichste Meta-Bilder + Länder-Rangliste
+route('POST', '/api/vision/similar', async ({ req }) => {
+  const type = String(req.headers['content-type'] ?? '').split(';')[0];
+  const query = await callVision('/embed', await readBody(req, MAX_VISION_BYTES), type);
+  const q = Float32Array.from(query.vector);
+  const rows = db
+    .prepare(
+      `SELECT e.image_id, e.vector, i.filename, i.meta_id, m.country_iso, m.title, c.name AS category_name
+       FROM image_embeddings e JOIN meta_images i ON i.id = e.image_id
+       JOIN metas m ON m.id = i.meta_id JOIN categories c ON c.id = m.category_id
+       WHERE e.model = ?`,
+    )
+    .all(query.model);
+  const scored = rows.map((r) => {
+    const v = fromBlob(r.vector);
+    let dot = 0;
+    for (let k = 0; k < v.length; k++) dot += v[k] * q[k];
+    return {
+      image_id: r.image_id, url: `/uploads/${r.filename}`, meta_id: r.meta_id, country_iso: r.country_iso,
+      title: r.title, category_name: r.category_name, score: Math.round(dot * 1000) / 1000,
+    };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const images = scored.slice(0, 40);
+  // Länder: bestes Bild zählt, weitere gute Treffer geben einen kleinen Bonus
+  const byCountry = new Map();
+  for (const img of scored.slice(0, 200)) {
+    const c = byCountry.get(img.country_iso) ?? { iso: img.country_iso, best: img.score, hits: 0 };
+    c.hits += img.score >= c.best - 0.05 ? 1 : 0;
+    byCountry.set(img.country_iso, c);
+  }
+  const countries = [...byCountry.values()]
+    .map((c) => ({ ...c, score: Math.round((c.best + Math.min(c.hits - 1, 4) * 0.005) * 1000) / 1000 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 15);
+  return { model: query.model, indexed: rows.length, images, countries };
+});
+
+// OCR: Body = Bild → erkannter Text + Länder-Vorschläge aus Schrift und Sonderzeichen
+route('POST', '/api/vision/ocr', async ({ req }) => {
+  const type = String(req.headers['content-type'] ?? '').split(';')[0];
+  const r = await callVision('/ocr', await readBody(req, MAX_VISION_BYTES), type);
+  // Sprache bestimmen und daraus Länder vorschlagen (siehe ocrHints.js)
+  return { ...r, ...hintsFromOcr(r) };
+});
+
 // ---------- Einstellungen ----------
 const SETTINGS_DEFAULTS = { disabled_countries: [] };
 
@@ -890,6 +1022,7 @@ route('POST', '/api/metas/:id/images', async ({ req, params, url }) => {
   const r = db
     .prepare('INSERT INTO meta_images (meta_id, filename, caption, sort) VALUES (?, ?, ?, ?)')
     .run(id, filename, caption, sort);
+  setTimeout(indexImages, 50); // CLIP-Vektor im Hintergrund berechnen
   return [201, withUrl({ id: Number(r.lastInsertRowid), filename, caption })];
 });
 
@@ -970,6 +1103,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 rebuildSearchIndex();
+// Bild-Index nach dem Start und danach regelmäßig vervollständigen (z.B. wenn vision später startet)
+if (VISION_URL) {
+  setTimeout(indexImages, 5_000);
+  setInterval(indexImages, 5 * 60_000).unref();
+}
 
 server.listen(PORT, () => {
   console.log(`GeoGuessr Helper API läuft auf Port ${PORT} (DB: ${DB_FILE})`);

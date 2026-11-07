@@ -154,6 +154,15 @@ export function openDb(file) {
     );
   `);
 
+  // Bilderkennung: CLIP-Vektor je Bild (Float32, normiert) für die Ähnlichkeitssuche
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS image_embeddings (
+      image_id INTEGER PRIMARY KEY REFERENCES meta_images(id) ON DELETE CASCADE,
+      model    TEXT NOT NULL,
+      vector   BLOB NOT NULL
+    );
+  `);
+
   // App-Einstellungen (JSON-Werte), z.B. ausgeschaltete Länder
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
