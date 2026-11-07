@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react';
 import { CONTINENTS, flagUrl } from '../geo';
-import type { CountryInfo, Meta, RegionGroup } from '../types';
+import type { Category, CountryInfo, Meta, RegionGroup } from '../types';
 
 const continentName = (id: string) => CONTINENTS.find((c) => c.id === id)?.name ?? id;
 
@@ -86,6 +86,41 @@ export function GroupBar({
       {!hasSelection && groups.length > 0 && (
         <span className="muted small-hint">Strg+Klick auf Regionen → „+ Gruppe aus Auswahl“</span>
       )}
+    </div>
+  );
+}
+
+interface CategoryBarProps {
+  categories: Category[];
+  /** Anzahl Metas je Kategorie – nur Kategorien mit Metas (bzw. die aktive) werden gezeigt */
+  counts: Record<number, number>;
+  active: number | null;
+  onSelect: (id: number | null) => void;
+  /** Text, wenn es noch gar keine Metas gibt */
+  emptyHint: string;
+}
+
+/**
+ * Kategorien als Buttons: Klick zeigt die Infografik dieser Kategorie und filtert die Seitenleiste,
+ * erneuter Klick blendet sie wieder aus.
+ */
+export function CategoryBar({ categories, counts, active, onSelect, emptyHint }: CategoryBarProps) {
+  const shown = categories.filter((c) => (counts[c.id] ?? 0) > 0 || c.id === active);
+  return (
+    <div className="category-bar">
+      <span className="muted">🗺 Kategorie:</span>
+      {shown.length === 0 && <span className="muted small-hint">{emptyHint}</span>}
+      {shown.map((c) => (
+        <button
+          key={c.id}
+          className={`chip ${active === c.id ? 'active' : ''}`}
+          onClick={() => onSelect(active === c.id ? null : c.id)}
+          title={active === c.id ? 'Erneut klicken: Infografik ausblenden' : `Infografik „${c.name}“ anzeigen`}
+        >
+          {c.name} <span className="chip-count">{counts[c.id] ?? 0}</span>
+        </button>
+      ))}
+      {active != null && <span className="muted small-hint">erneut klicken zum Ausblenden</span>}
     </div>
   );
 }

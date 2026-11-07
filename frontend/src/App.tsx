@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MultiPolygon } from 'geojson';
 import { api } from './api';
-import { CONTINENTS, GROUP_COLORS, loadCountries, loadRegions, type CountryCollection, type RegionData } from './geo';
-import type { Category, CountryInfo, InfoItem, Meta, RegionGroup } from './types';
-import { WorldMap } from './components/WorldMap';
+import { CONTINENTS, GROUP_COLORS, geometryInfo, loadCountries, loadRegions, type CountryCollection, type RegionData } from './geo';
+import type { Category, CountryInfo, DrawSettings, InfoItem, Meta, MetaArea, RegionGroup } from './types';
+import { WorldMap, type DrawApi } from './components/WorldMap';
 import { CountryPanel } from './components/CountryPanel';
-import { CountryBar, GroupBar } from './components/CountryBar';
-import { MetaForm } from './components/MetaForm';
+import { CategoryBar, CountryBar, GroupBar } from './components/CountryBar';
+import { AREA_COLOR, MetaForm } from './components/MetaForm';
 import { GroupForm } from './components/GroupForm';
 import { OptionsDrawer } from './components/OptionsDrawer';
 import { Lightbox } from './components/Lightbox';
@@ -29,14 +30,19 @@ export default function App() {
   const selectedRegions = selection.iso ? selection.regions : EMPTY_REGIONS;
   const [regionData, setRegionData] = useState<RegionData | null>(null);
   const [groups, setGroups] = useState<RegionGroup[]>([]);
+  // Pinsel im Meta-Formular (Zeichenmodus auf der Karte) und ausgewähltes Meta in der Seitenleiste
+  const [drawing, setDrawing] = useState<DrawSettings | null>(null);
+  const [selectedMetaId, setSelectedMetaId] = useState<number | null>(null);
+  const drawApi = useRef<DrawApi | null>(null);
   const [metas, setMetas] = useState<Meta[]>([]);
   const [loadingMetas, setLoadingMetas] = useState(false);
   const [editing, setEditing] = useState<{ meta: Meta | null; refs: string[]; groupIds: number[] } | null>(null);
   const [groupEditing, setGroupEditing] = useState<{ group: RegionGroup | null; members: string[] } | null>(null);
-  const [infoCategory, setInfoCategory] = useState<number | null>(null);
+  // Aktive Kategorie (Buttons über der Karte): zeigt die Infografik und filtert die Seitenleiste.
+  // Gilt für Welt und Land gleichermaßen – beim Öffnen eines Landes bleibt sie erhalten.
+  const [activeCategory, setActiveCategory] = useState<number | null>(null);
   // Weltansicht: Kontinent-Filter, Welt-Infografik (landesweite Metas einer Kategorie), Ländernamen
   const [continentId, setContinentId] = useState<string | null>(() => localStorage.getItem('continent'));
-  const [worldInfoCategory, setWorldInfoCategory] = useState<number | null>(null);
   const [worldMetas, setWorldMetas] = useState<Meta[]>([]);
   const [showLabels, setShowLabels] = useState(() => localStorage.getItem('labels') !== '0');
   const continent = CONTINENTS.find((c) => c.id === continentId) ?? null;
@@ -115,7 +121,8 @@ export default function App() {
   useEffect(() => {
     setMetas([]);
     setGroups([]);
-    setInfoCategory(null);
+    setDrawing(null);
+    setSelectedMetaId(null);
     if (selectedIso) {
       loadMetas(selectedIso);
       loadGroups(selectedIso);
@@ -130,15 +137,15 @@ export default function App() {
 
   // Welt-Infografik: landesweite Metas der Kategorie laden (auch nach Rückkehr aus einem Land)
   useEffect(() => {
-    if (worldInfoCategory == null || selectedIso) return;
+    if (activeCategory == null || selectedIso) return;
     let cancelled = false;
-    api.categoryMetas(worldInfoCategory)
+    api.categoryMetas(activeCategory)
       .then((m) => !cancelled && setWorldMetas(m))
       .catch((e) => setError((e as Error).message));
     return () => {
       cancelled = true;
     };
-  }, [worldInfoCategory, selectedIso]);
+  }, [activeCategory, selectedIso]);
 
   // admin1-Grenzen des Landes nachladen (werden gecacht)
   useEffect(() => {
@@ -160,7 +167,11 @@ export default function App() {
   // admin1-Regionen eines Metas – Gruppen werden in ihre Mitglieder aufgelöst
   const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   const metaRefs = useCallback(
-    (m: Meta) => [...new Set(m.regions.flatMap((r) => (r.ref ? [r.ref] : groupsById.get(r.id)?.members ?? [])))],
+    (m: Meta) => [
+      ...new Set(
+        m.regions.flatMap((r) => (r.ref ? [r.ref] : groupsById.get(r.id)?.members ?? [])),
+      ),
+    ],
     [groupsById],
   );
 
@@ -171,42 +182,92 @@ export default function App() {
     return counts;
   }, [metas, metaRefs]);
 
+  // Eingezeichnete Bereiche (Pinsel) je Meta
+  const metaAreas = useMemo(() => {
+    const out = new Map<number, MetaArea>();
+    for (const m of metas) {
+      if (!m.area) continue;
+      try {
+        const geometry = JSON.parse(m.area) as MultiPolygon;
+        out.set(m.id, { geometry, ...geometryInfo(geometry) });
+      } catch {
+        /* kaputte Geometrie ignorieren */
+      }
+    }
+    return out;
+  }, [metas]);
+  const selectedArea = selectedMetaId != null ? metaAreas.get(selectedMetaId) ?? null : null;
+
   // Gruppe, deren Mitglieder genau der aktuellen Auswahl entsprechen
   const activeGroup = selectedRegions.length ? groups.find((g) => sameSet(g.members, selectedRegions)) ?? null : null;
 
   // Infografik: ein Kasten pro Meta der gewählten Kategorie
   const infographic = useMemo<InfoItem[] | null>(() => {
-    if (infoCategory == null) return null;
+    if (activeCategory == null) return null;
     let next = 0;
-    return metas
-      .filter((m) => m.category_id === infoCategory)
+    const items = metas
+      .filter((m) => m.category_id === activeCategory)
       .map((m) => {
-        const onlyGroup = m.regions.length === 1 && m.regions[0].source === 'group' ? m.regions[0] : null;
-        const color = m.regions.length === 0
+        // Ein Meta mit genau einer Gruppe bekommt deren Farbe
+        const onlyGroup = m.regions.length === 1 && m.regions[0].source !== 'admin1' ? m.regions[0] : null;
+        const refs = metaRefs(m);
+        // Eingezeichneter Bereich → Linie zeigt dorthin (genauer als die Regionen)
+        const area = metaAreas.get(m.id);
+        const color = m.regions.length === 0 && !area
           ? '#ffffff'
           : onlyGroup?.color ?? GROUP_COLORS[next++ % GROUP_COLORS.length];
         return {
           key: String(m.id),
           color,
-          refs: metaRefs(m),
-          label: m.regions.length ? m.regions.map((r) => (r.ref && regions?.get(r.ref)?.name) || r.name).join(', ') : 'Landesweit',
+          refs,
+          anchor: area?.anchor,
+          areaId: area ? m.id : undefined,
+          label: m.regions.length
+            ? m.regions.map((r) => (r.ref && regions?.get(r.ref)?.name) || r.name).join(', ')
+            : area ? '🖌 Bereich' : 'Landesweit',
           title: m.title,
           text: m.text,
           image: m.images[0]?.url ?? null,
         };
       });
-  }, [infoCategory, metas, metaRefs, regions]);
+    return items.length ? items : null; // keine Metas dieser Kategorie im Land → normale Karte
+  }, [activeCategory, metas, metaRefs, regions, metaAreas]);
+
+  // Sichtbare Bereiche auf der Karte: nur das ausgewählte Meta – und in der Infografik die Bereiche ihrer Metas
+  const visibleAreas = useMemo(() => {
+    const out: { id: number; color: string; geometry: MultiPolygon }[] = [];
+    for (const item of infographic ?? []) {
+      const a = item.areaId != null ? metaAreas.get(item.areaId) : undefined;
+      if (a && item.areaId !== selectedMetaId) out.push({ id: item.areaId!, color: item.color, geometry: a.geometry });
+    }
+    if (selectedArea && selectedMetaId != null) out.push({ id: selectedMetaId, color: AREA_COLOR, geometry: selectedArea.geometry });
+    return out;
+  }, [infographic, metaAreas, selectedArea, selectedMetaId]);
+
+  const refName = useCallback((ref: string) => regions?.get(ref)?.name ?? ref, [regions]);
+
+  // Anzahl Metas je Kategorie im geöffneten Land (für die Kategorie-Leiste)
+  const countryCategoryCounts = useMemo(() => {
+    const c: Record<number, number> = {};
+    for (const m of metas) c[m.category_id] = (c[m.category_id] ?? 0) + 1;
+    return c;
+  }, [metas]);
+  // … und landesweite Metas je Kategorie weltweit (Welt-Infografik)
+  const worldCategoryCounts = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c.general_count ?? 0])),
+    [categories],
+  );
 
   // Ausgeschaltete Länder lassen sich nicht öffnen (auch nicht per Link)
   const country = selectedIso && geo && !disabled.has(selectedIso) ? geo.countries.get(selectedIso) ?? null : null;
 
   // Welt-Infografik: ein Kasten pro Land (bzw. Meta), Linie zum Land, Land in Kastenfarbe
   const worldInfographic = useMemo<InfoItem[] | null>(() => {
-    if (worldInfoCategory == null || !geo) return null;
+    if (activeCategory == null || !geo) return null;
     const colorOf = new Map<string, string>();
     const items: InfoItem[] = [];
     for (const m of worldMetas) {
-      if (m.category_id !== worldInfoCategory) continue;
+      if (m.category_id !== activeCategory) continue;
       const c = geo.countries.get(m.country_iso);
       if (!c || disabled.has(c.iso) || (continent && c.continent !== continent.id)) continue;
       if (!colorOf.has(c.iso)) colorOf.set(c.iso, GROUP_COLORS[colorOf.size % GROUP_COLORS.length]);
@@ -223,7 +284,7 @@ export default function App() {
       });
     }
     return items;
-  }, [worldInfoCategory, worldMetas, geo, continent, disabled]);
+  }, [activeCategory, worldMetas, geo, continent, disabled]);
 
   const countryList = useMemo(
     () =>
@@ -248,13 +309,14 @@ export default function App() {
     if (!confirm(`„${m.title || m.category_name}“ wirklich löschen?`)) return;
     await api.deleteMeta(m.id);
     if (selectedIso) await loadMetas(selectedIso);
-    await refreshStats();
+    await Promise.all([refreshStats(), loadCategories()]);
   };
 
   const onSaved = async () => {
     setEditing(null);
+    setDrawing(null);
     if (selectedIso) await loadMetas(selectedIso);
-    await refreshStats();
+    await Promise.all([refreshStats(), loadCategories()]);
   };
 
   // Gruppen aus Natural-Earth-Regionen vorschlagen (z.B. Japan: Tohoku, Kanto, …)
@@ -329,18 +391,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <label className="world-info">
-            🗺 Infografik:
-            <select
-              value={worldInfoCategory ?? ''}
-              onChange={(e) => setWorldInfoCategory(e.target.value ? Number(e.target.value) : null)}
-              title="Landesweite Metas einer Kategorie als Infografik zeigen"
-            >
-              <option value="">aus</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </label>
-          {worldInfographic && (
+          {activeCategory != null && worldInfographic && (
             <span className="muted">
               {worldInfographic.length
                 ? `${new Set(worldInfographic.map((i) => i.iso)).size} Länder · Kasten anklicken öffnet das Land`
@@ -348,6 +399,15 @@ export default function App() {
             </span>
           )}
         </div>
+      )}
+      {!country && geo && (
+        <CategoryBar
+          categories={categories}
+          counts={worldCategoryCounts}
+          active={activeCategory}
+          onSelect={setActiveCategory}
+          emptyHint="Noch keine landesweiten Metas – Land anklicken und „+ Meta“"
+        />
       )}
 
       <div className={`main ${country && !sidebarCollapsed ? 'with-sidebar' : ''}`}>
@@ -358,13 +418,15 @@ export default function App() {
           loading={loadingMetas}
           categories={categories}
           regions={regions}
-          regionCounts={regionCounts}
           selectedRegions={selectedRegions}
           onSelectRegions={selectRegions}
           metaRefs={metaRefs}
           activeGroup={activeGroup}
-          infoCategory={infoCategory}
-          onInfographic={setInfoCategory}
+          activeCategory={activeCategory}
+          onClearCategory={() => setActiveCategory(null)}
+          refName={refName}
+          selectedMetaId={selectedMetaId}
+          onSelectMeta={setSelectedMetaId}
           onAdd={() =>
             setEditing(
               activeGroup
@@ -389,7 +451,7 @@ export default function App() {
           onBack={() => select(null)}
         />
       )}
-      {country && regions && regions.size > 0 && (
+      {country && (
         <GroupBar
           groups={groups}
           activeGroup={activeGroup}
@@ -399,6 +461,15 @@ export default function App() {
           onEditGroup={(g) => setGroupEditing({ group: g, members: g.members })}
           suggestedGroupCount={groups.length === 0 ? suggestedGroups.length : 0}
           onSuggestGroups={applySuggestedGroups}
+        />
+      )}
+      {country && (
+        <CategoryBar
+          categories={categories}
+          counts={countryCategoryCounts}
+          active={activeCategory}
+          onSelect={setActiveCategory}
+          emptyHint={`Noch keine Metas für ${country.name}`}
         />
       )}
       {geo ? (
@@ -418,6 +489,10 @@ export default function App() {
           showLabels={showLabels}
           onToggleLabels={() => setShowLabels((v) => !v)}
           disabled={disabled}
+          metaAreas={country ? visibleAreas : []}
+          focusBBox={country ? selectedArea?.bbox ?? null : null}
+          drawing={country ? drawing : null}
+          drawApi={drawApi}
         />
       ) : (
         <div className="map-wrap loading">Lade Karte…</div>
@@ -429,11 +504,18 @@ export default function App() {
           country={country}
           categories={categories}
           meta={editing.meta}
+          initialCategoryId={activeCategory}
           regions={regions}
           groups={groups}
           initialRegionRefs={editing.refs}
           initialGroupIds={editing.groupIds}
-          onClose={() => setEditing(null)}
+          drawing={drawing}
+          onDrawingChange={setDrawing}
+          drawApi={drawApi}
+          onClose={() => {
+            setEditing(null);
+            setDrawing(null);
+          }}
           onSaved={onSaved}
           onCategoryCreated={(c) => setCategories((cs) => [...cs, c])}
         />

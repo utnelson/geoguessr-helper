@@ -161,3 +161,19 @@ export const CONTINENTS: { id: string; name: string; bbox: BBox }[] = [
   { id: 'South America', name: 'Südamerika', bbox: [-82, -56, -34, 13] },
   { id: 'Oceania', name: 'Ozeanien', bbox: [110, -48, 180, 0] },
 ];
+
+/** Rahmen und Ankerpunkt einer gezeichneten Fläche */
+export function geometryInfo(geom: MultiPolygon): { bbox: BBox; anchor: [number, number] } {
+  let w = Infinity, south = Infinity, e = -Infinity, n = -Infinity;
+  for (const poly of geom.coordinates) {
+    const [a, b, c, d] = ringBBox(poly[0]);
+    w = Math.min(w, a);
+    south = Math.min(south, b);
+    e = Math.max(e, c);
+    n = Math.max(n, d);
+  }
+  // Anker: Schwerpunkt des größten Teils (liegt bei kompakten Pinsel-Flächen innerhalb)
+  const largest = [...geom.coordinates].sort((p, q) => ringArea(q[0]) - ringArea(p[0]))[0];
+  const c = featureCentroid({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: largest } });
+  return { bbox: [w, south, e, n], anchor: [c.x, c.y] };
+}

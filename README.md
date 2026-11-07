@@ -79,6 +79,8 @@ docker-compose.yml
 - `regions` – admin1-Regionen (`source = 'admin1'`, `ref` = Natural-Earth-`adm1_code`, z.B. `DEU-1591`;
   die Geometrie liegt im Frontend unter `/geo/admin1/<ISO>.geojson`) oder selbst gezeichnete Polygone
   (`source = 'custom'`, GeoJSON in `geometry`). admin1-Regionen werden erst beim ersten Regionen-Meta angelegt.
+- `metas.area` – mit dem Pinsel eingezeichneter Bereich des Metas (GeoJSON MultiPolygon, an der Landesgrenze
+  abgeschnitten). Frühere „eigene Gebiete“ (`regions.source = 'custom'`) werden beim Start in ihre Metas übernommen.
 - **Regionsgruppen**: `regions.source = 'group'` mit `color`, Mitglieder (admin1-`ref`s) in `region_members`.
   Ein Meta kann einer Gruppe zugeordnet sein – ändert man die Gruppe, gilt das Meta automatisch für die neuen Mitglieder.
 - `attributes` / `meta_attributes` – strukturierte Merkmale für die Rückwärtssuche,
@@ -112,7 +114,11 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 - Die App hat keinen Login: Wer sie erreicht, kann auch ein Backup einspielen. Nur geschützt (VPN / Proxy mit Login) freigeben.
 - **Kontinente:** In der Weltansicht oben *Europa*, *Asien* … wählen → Karte zoomt hin, andere Länder werden
   abgedunkelt. Die Auswahl bleibt gespeichert (auch nach Rückkehr aus einem Land).
-- **Welt-Infografik:** oben *🗺 Infografik: Kategorie* wählen → jedes Land mit einem **landesweiten** Meta dieser
+- **Kategorie-Leiste** (🗺 Kategorie, unter den Kontinenten bzw. unter den Gruppen): Klick auf eine Kategorie
+  zeigt sofort die **Infografik** und filtert die Seitenleiste, erneuter Klick blendet beides wieder aus.
+  Die Zahl am Button = Anzahl Metas (Weltansicht: landesweite Metas). Die Kategorie bleibt beim Wechsel
+  Welt ↔ Land aktiv; „+ Meta“ wählt sie automatisch vor.
+- **Welt-Infografik:** Kategorie in der Weltansicht wählen → jedes Land mit einem **landesweiten** Meta dieser
   Kategorie wird eingefärbt und bekommt einen Kasten mit Bild/Text, verbunden mit dem Land. Mit Kontinent-Filter
   nur dessen Länder. Kasten anklicken öffnet das Land.
 - **Ländernamen:** Schalter *Aa Ländernamen* oben links auf der Karte. Kleine Länder erscheinen erst beim Zoomen,
@@ -121,7 +127,7 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
   **Screenshot mit Strg+V** einfügen.
 - Länderfarbe zeigt, wie viele Metas du schon hast (grau = noch nichts).
 - Beim Zoom auf ein Land erscheinen die **Regionsgrenzen** (Bundesländer, States, Provinzen …).
-  Region anklicken oder im Panel auswählen → Zoom auf die Region, Panel zeigt nur deren Metas,
+  Region auf der Karte anklicken → Zoom auf die Region, Panel zeigt nur deren Metas,
   **+ Regionen-Meta** legt ein Meta für diese Region an. Link: `#DE/DEU-1591` (Bayern).
 - **Mehrere Regionen:** mit **Strg+Klick** (oder Shift/⌘) weitere Regionen dazunehmen bzw. wieder
   abwählen – die Karte bleibt dabei stehen. **+ Meta für N Regionen** legt ein Meta an, das für alle
@@ -133,7 +139,13 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
   Name und Farbe vergeben. Wo Natural Earth eine Einteilung kennt (Japan, Frankreich, USA …), legt
   **✨ Gruppen vorschlagen** sie auf Knopfdruck an – danach per ✎ umbenennen, Farbe ändern, Regionen verschieben.
   Klick auf eine Gruppe markiert ihre Regionen, **+ Meta für Kansai** legt ein Meta für die ganze Gruppe an.
-- **Infografik**: Kategorie-Filter wählen (z.B. *Masten*) → **🗺 Infografik**. Die Karte färbt jede Gruppe in ihrer
+- **🖌 Bereich einzeichnen** (im Meta-Formular): mit dem Pinsel genau den Bereich auf die Karte malen, für den
+  **dieses eine Meta** gilt – Pinselgröße einstellbar, Radierer, getrennte Flecken erlaubt. Gemalt wird nur
+  **innerhalb der Landesgrenze**. Die Karte ist währenddessen fixiert, also vorher passend zoomen.
+  *✓ Bereich übernehmen*, dann Meta speichern. Der Bereich ist nur sichtbar, wenn das Meta in der Seitenleiste
+  **angeklickt** ist (die Karte zoomt dann hin) – und in der Infografik seiner Kategorie (Linie zeigt auf den
+  Bereich). Tasten: B Pinsel · E Radierer · + / − Größe · Esc Zeichnen abbrechen.
+- **Infografik im Land**: Kategorie in der Kategorie-Leiste anklicken (z.B. *Masten*). Die Karte färbt jede Gruppe in ihrer
   Farbe und zeigt pro Meta einen Kasten mit Bild, Titel und Text, verbunden mit einer Linie zur Region;
   landesweite Metas stehen ohne Linie daneben. Beim Verschieben/Zoomen ordnen sich die Kästen neu.
 
@@ -142,7 +154,7 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 1. ✅ Weltkarte, Zoom, allgemeine Metas mit Bildern, Docker
 2. ✅ Regionen: admin1-Grenzen (Natural Earth 10m) beim Zoom einblenden, Regionen-Metas auf der Karte
    - ✅ Regionsgruppen (inkl. Vorschlag aus Natural Earth) und Infografik-Ansicht pro Kategorie
-   - offen: eigene Regionen zeichnen (Datenmodell steht schon: `source = 'custom'`)
+   - ✅ Bereiche je Meta mit dem Pinsel einzeichnen (`metas.area`, GeoJSON MultiPolygon)
 3. Attribute pro Kategorie + **Rückwärtssuche** („runder Mast mit Waffelmuster“ → Länder werden auf
    der Karte markiert)
 4. Lernmodus: Quiz (Bild → Land auf Karte klicken), Karteikarten mit Spaced Repetition, Statistik

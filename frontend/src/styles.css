@@ -501,3 +501,76 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .btn.danger-solid { background: #8f2d2d; border-color: #b53b3b; color: #fff; font-weight: 600; }
 .success { color: var(--green); margin: 8px 0 0; }
 .modal input[type='file'] { padding: 6px; }
+
+/* ---------- Kategorie-Leiste (über der Karte) ---------- */
+.category-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.chip-count { opacity: 0.6; font-size: 0.75rem; margin-left: 2px; }
+.chip.active .chip-count { opacity: 0.8; }
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.filter-pill button { background: none; border: none; cursor: pointer; color: inherit; font-size: 1rem; padding: 0 4px; }
+.panel-add { margin-left: auto; }
+
+/* ---------- Pinsel: eigene Gebiete zeichnen ---------- */
+.draw-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  opacity: 0.6;
+  cursor: none;
+  touch-action: none;
+}
+.brush-cursor {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  border: 2px solid;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.brush-cursor.erase { border-style: dashed; border-color: #fff !important; }
+.group-chip.area { border-style: dashed; }
+.tool-row { flex-wrap: wrap; }
+.tool-row .btn { flex: 0 0 auto; }
+.drawer input[type='range'] { padding: 0; }
+/* Farbwähler neben den Farbtupfern nicht auf volle Breite ziehen */
+.color-swatches .color-input { width: 36px !important; height: 26px; flex: 0 0 36px !important; padding: 0 !important; }
+.drawer { overflow-x: hidden; }
+.drawer > .drawer-form { overflow-x: hidden; }
+
+/* ---------- Bereich eines Metas (Pinsel im Formular) ---------- */
+.draw-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed #e64980;
+  border-radius: 10px;
+  background: rgba(230, 73, 128, 0.08);
+}
+.draw-start { align-self: flex-start; }
+.area-row { align-items: center; flex-wrap: wrap; }
+.area-chip { border-color: #e64980; background: rgba(230, 73, 128, 0.2); padding-right: 10px; }
+.card.selectable { cursor: pointer; }
+.card.selectable:hover { border-color: #4a6a90; }
+.card.selected { border-color: #e64980; box-shadow: 0 0 0 1px #e64980; }
+.card-area { font-size: 0.78rem; color: #f783ac; margin-bottom: 4px; }

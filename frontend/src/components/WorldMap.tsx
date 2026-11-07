@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import maplibregl, { type ExpressionSpecification, type GeoJSONSource, type Map as MLMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { regionsAnchor, type CountryCollection, type RegionData } from '../geo';
-import type { BBox, CountryInfo, InfoItem } from '../types';
+import type { MultiPolygon, Polygon } from 'geojson';
+import { geometryInfo, regionsAnchor, type CountryCollection, type RegionData } from '../geo';
+import { paintGeometry, toMultiPolygon, traceMask } from '../brush';
+import type { BBox, CountryInfo, DrawSettings, InfoItem } from '../types';
+
+/** Schnittstelle des Zeichenmodus für das Formular (Speichern / Löschen) */
+export interface DrawApi {
+  toGeometry: () => MultiPolygon | null;
+  clear: () => void;
+}
 
 interface Props {
   geojson: CountryCollection;
@@ -25,6 +33,13 @@ interface Props {
   onToggleLabels: () => void;
   /** ausgeschaltete Länder: grau, nicht anklickbar, Name gedämpft */
   disabled: Set<string>;
+  /** eingezeichnete Meta-Bereiche, die gerade sichtbar sein sollen (ausgewähltes Meta, Infografik) */
+  metaAreas: { id: number; color: string; geometry: MultiPolygon }[];
+  /** Bereich des ausgewählten Metas → dorthin zoomen */
+  focusBBox: BBox | null;
+  /** Zeichenmodus (Pinsel) – null = aus */
+  drawing: DrawSettings | null;
+  drawApi: MutableRefObject<DrawApi | null>;
 }
 
 // ---------- Paint-Ausdrücke: normale Ansicht vs. Infografik ----------
@@ -55,6 +70,7 @@ const REGION_FILL_INFO: ExpressionSpecification = [
   'case', IS('selected'), '#e8590c', HAS_INFO, ['to-color', STATE('info')], IS('hover'), '#ffffff', '#000000',
 ];
 const REGION_OPACITY_INFO: ExpressionSpecification = ['case', IS('selected'), 0.85, HAS_INFO, ['case', IS('hover'), 0.7, 0.95], IS('hover'), 0.3, 0];
+
 
 // ---------- Infografik-Layout ----------
 const CARD_W = 190;
@@ -141,7 +157,7 @@ type Hover = { kind: 'country' | 'region'; id: string; name: string; sub?: strin
 
 export function WorldMap({
   geojson, countries, stats, selectedIso, onSelect, regionData, regionCounts, selectedRegions, onSelectRegions,
-  infographic, onOpenImage, continent, showLabels, onToggleLabels, disabled,
+  infographic, onOpenImage, continent, showLabels, onToggleLabels, disabled, metaAreas, focusBBox, drawing, drawApi,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -154,6 +170,8 @@ export function WorldMap({
   handlers.current = { onSelect, onSelectRegions, selectedIso, selectedRegions, disabled };
 
   const [ready, setReady] = useState(false);
+  // true erst nach dem load-Event der aktuellen Karteninstanz (schützt vor Zugriffen beim Neuaufbau)
+  const loadedRef = useRef(false);
   const [hover, setHover] = useState<Hover | null>(null);
   // Infografik/Ländernamen: bei jeder Kartenbewegung neu layouten
   const infoActive = useRef(false);
@@ -213,6 +231,21 @@ export function WorldMap({
         },
       });
 
+      // Mit dem Pinsel eingezeichnete Bereiche von Metas (nur Anzeige, nicht anklickbar)
+      map.addSource('meta-areas', { type: 'geojson', data: EMPTY });
+      map.addLayer({
+        id: 'meta-area-fill',
+        type: 'fill',
+        source: 'meta-areas',
+        paint: { 'fill-color': ['to-color', ['get', 'color']], 'fill-opacity': 0.55 },
+      });
+      map.addLayer({
+        id: 'meta-area-line',
+        type: 'line',
+        source: 'meta-areas',
+        paint: { 'line-color': ['to-color', ['get', 'color']], 'line-width': 2.5, 'line-dasharray': [2, 1] },
+      });
+
       map.addLayer({
         id: 'country-line',
         type: 'line',
@@ -222,15 +255,16 @@ export function WorldMap({
           'line-width': ['case', ['boolean', ['feature-state', 'selected'], false], 2, 0.6],
         },
       });
+      loadedRef.current = true;
       setReady(true);
     });
 
-    let hovered: { source: string; id: string } | null = null;
+    let hovered: { source: string; id: string | number } | null = null;
     const clearHover = () => {
       if (hovered) map.setFeatureState(hovered, { hover: false });
       hovered = null;
     };
-    const setHovered = (source: string, id: string) => {
+    const setHovered = (source: string, id: string | number) => {
       if (hovered?.source === source && hovered.id === id) return;
       clearHover();
       hovered = { source, id };
@@ -306,6 +340,7 @@ export function WorldMap({
     ro.observe(container);
     mapRef.current = map;
     return () => {
+      loadedRef.current = false;
       ro.disconnect();
       map.remove();
       mapRef.current = null;
@@ -321,7 +356,7 @@ export function WorldMap({
 
   // Einfärbung nach Anzahl Metas
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     for (const iso of countries.keys()) {
       map.setFeatureState({ source: 'countries', id: iso }, { count: stats[iso] ?? 0 });
@@ -330,14 +365,14 @@ export function WorldMap({
 
   // Ausgeschaltete Länder
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     for (const iso of countries.keys()) map.setFeatureState({ source: 'countries', id: iso }, { off: disabled.has(iso) });
   }, [ready, countries, disabled]);
 
   // Kontinent: andere Länder abdunkeln (nur in der Weltansicht)
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     for (const c of countries.values()) {
       map.setFeatureState(
@@ -350,7 +385,7 @@ export function WorldMap({
   // Regionen des ausgewählten Landes einblenden
   const regions = regionData && regionData.iso === selectedIso ? regionData : null;
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     (map.getSource('regions') as GeoJSONSource).setData(regions?.geojson ?? EMPTY);
     prevRegions.current = []; // Feature-States gehen mit setData verloren
@@ -359,7 +394,7 @@ export function WorldMap({
 
   // Regionen-Einfärbung + Auswahl
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map || !regions) return;
     for (const id of regions.regions.keys()) {
       map.setFeatureState({ source: 'regions', id }, { count: regionCounts[id] ?? 0 });
@@ -367,7 +402,7 @@ export function WorldMap({
   }, [ready, regions, regionCounts]);
 
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map || !regions) return;
     for (const id of prevRegions.current) {
       if (regions.regions.has(id)) map.setFeatureState({ source: 'regions', id }, { selected: false });
@@ -378,9 +413,30 @@ export function WorldMap({
     }
   }, [ready, regions, selectedRegions]);
 
+  // Meta-Bereiche anzeigen (im Zeichenmodus nicht – dort liegt das Gemalte auf dem Canvas)
+  useEffect(() => {
+    const map = loadedRef.current ? mapRef.current : null;
+    if (!ready || !map) return;
+    (map.getSource('meta-areas') as GeoJSONSource).setData({
+      type: 'FeatureCollection',
+      features: drawing
+        ? []
+        : metaAreas.map((a) => ({ type: 'Feature', properties: { id: a.id, color: a.color }, geometry: a.geometry })),
+    });
+  }, [ready, metaAreas, drawing]);
+
+  // Ausgewähltes Meta mit Bereich → hinzoomen
+  const focusKey = focusBBox?.join(',') ?? null;
+  useEffect(() => {
+    const map = loadedRef.current ? mapRef.current : null;
+    if (!ready || !map || !focusBBox) return;
+    const [w, s, e, n] = focusBBox;
+    map.fitBounds([[w, s], [e, n]], { padding: 60, maxZoom: 9, duration: 700 });
+  }, [ready, focusKey]);
+
   // Länder-Auswahl hervorheben
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     if (prevSelected.current) {
       map.setFeatureState({ source: 'countries', id: prevSelected.current }, { selected: false });
@@ -400,7 +456,7 @@ export function WorldMap({
   // ---------- Infografik ----------
   const infoMode = !!infographic;
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     map.setPaintProperty(
       'country-fill', 'fill-color', !infoMode ? COUNTRY_FILL : selectedIso ? COUNTRY_FILL_INFO : COUNTRY_FILL_WORLD_INFO,
@@ -413,7 +469,7 @@ export function WorldMap({
 
   // Welt-Infografik: Länder in der Farbe ihres Kastens einfärben
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map) return;
     for (const iso of prevCountryInfo.current) map.setFeatureState({ source: 'countries', id: iso }, { info: null });
     const next: string[] = [];
@@ -427,7 +483,7 @@ export function WorldMap({
 
   // Regionen in der Farbe ihres Kastens einfärben
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map || !regions) return;
     for (const id of prevInfo.current) {
       if (regions.regions.has(id)) map.setFeatureState({ source: 'regions', id }, { info: null });
@@ -454,7 +510,7 @@ export function WorldMap({
   // Beim Einschalten der Infografik: Land bzw. Kontinent zwischen die Kasten-Spalten einpassen
   const countryForInfo = selectedIso ? countries.get(selectedIso) : undefined;
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map || !infoMode) return;
     fitView(map, countryForInfo?.bbox ?? continent?.bbox ?? WORLD_BBOX, 7, 800);
   }, [ready, infoMode, countryForInfo]);
@@ -472,7 +528,7 @@ export function WorldMap({
   let placed: PlacedCard[] = [];
   let labels: ReturnType<typeof layoutLabels> = [];
   let size = { W: 0, H: 0 };
-  const map = mapRef.current;
+  const map = loadedRef.current ? mapRef.current : null;
   if (map && ready && containerRef.current) {
     size = { W: containerRef.current.clientWidth, H: containerRef.current.clientHeight };
   }
@@ -508,7 +564,7 @@ export function WorldMap({
     ? 'multi'
     : regionInfo ? `r:${regionInfo.id}` : countryInfo ? `c:${countryInfo.iso}` : continent ? `w:${continent.id}` : 'world';
   useEffect(() => {
-    const map = mapRef.current;
+    const map = loadedRef.current ? mapRef.current : null;
     if (!ready || !map || lastTarget.current === target) return;
     const from = lastTarget.current;
     lastTarget.current = target;
@@ -527,10 +583,16 @@ export function WorldMap({
   }, [ready, target, regionInfo, countryInfo]);
 
   const regionCount = regions?.regions.size ?? 0;
+  // Landesgrenze des geöffneten Landes – der Pinsel malt nur innerhalb
+  const clipGeometry = useMemo(
+    () => (selectedIso ? geojson.features.find((f) => f.properties.iso === selectedIso)?.geometry ?? null : null),
+    [geojson, selectedIso],
+  );
 
   return (
     <div className="map-wrap">
       <div ref={containerRef} className="map" />
+      {drawing && map && <DrawCanvas map={map} settings={drawing} apiRef={drawApi} clip={clipGeometry} />}
       {labels.length > 0 && (
         <div className="country-labels">
           {labels.map((l) => (
@@ -606,5 +668,153 @@ export function WorldMap({
         )}
       </div>}
     </div>
+  );
+}
+
+/**
+ * Pinsel-Overlay: Während des Zeichnens ist die Karte fixiert, gemalt wird auf ein Canvas über der Karte.
+ * Beim Speichern wird das Gemalte per traceMask() in ein Polygon umgewandelt.
+ */
+function DrawCanvas({ map, settings, apiRef, clip }: {
+  map: MLMap;
+  settings: DrawSettings;
+  apiRef: MutableRefObject<DrawApi | null>;
+  /** nur innerhalb dieser Fläche malen (Landesgrenze) */
+  clip: Polygon | MultiPolygon | null;
+}) {
+  const clipPath = useRef<Path2D | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  // Karte fixieren, Canvas vorbereiten, ggf. vorhandenes Gebiet vormalen
+  useEffect(() => {
+    const handlers = [map.dragPan, map.scrollZoom, map.boxZoom, map.doubleClickZoom, map.keyboard, map.touchZoomRotate];
+    const area = settingsRef.current.area;
+    if (area) {
+      const [w, s, e, n] = geometryInfo(area).bbox;
+      map.fitBounds([[w, s], [e, n]], { padding: 80, maxZoom: 9, duration: 0 });
+    }
+    handlers.forEach((h) => h.disable());
+    const canvas = canvasRef.current!;
+    const { clientWidth: W, clientHeight: H } = map.getContainer();
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    // Landesgrenze als Pfad (Ansicht ist fixiert, also nur einmal berechnen)
+    clipPath.current = null;
+    if (clip) {
+      const path = new Path2D();
+      const polys = clip.type === 'Polygon' ? [clip.coordinates] : clip.coordinates;
+      for (const rings of polys) {
+        for (const ring of rings) {
+          ring.forEach((p, k) => {
+            const pt = map.project(p as [number, number]);
+            if (k === 0) path.moveTo(pt.x, pt.y);
+            else path.lineTo(pt.x, pt.y);
+          });
+          path.closePath();
+        }
+      }
+      clipPath.current = path;
+    }
+    if (area) {
+      ctx.save();
+      if (clipPath.current) ctx.clip(clipPath.current, 'evenodd');
+      ctx.fillStyle = settingsRef.current.color;
+      paintGeometry(ctx, area, (p) => {
+        const pt = map.project(p as [number, number]);
+        return [pt.x, pt.y];
+      });
+      ctx.restore();
+    }
+    apiRef.current = {
+      toGeometry: () => {
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        return toMultiPolygon(traceMask(img.data, canvas.width, canvas.height, 2), (p) => {
+          const ll = map.unproject(p);
+          return [ll.lng, ll.lat];
+        });
+      },
+      clear: () => ctx.clearRect(0, 0, canvas.width, canvas.height),
+    };
+    return () => {
+      handlers.forEach((h) => h.enable());
+      map.touchZoomRotate.disableRotation();
+      apiRef.current = null;
+    };
+  }, [map, apiRef, clip]);
+
+  // „Alles löschen“
+  useEffect(() => {
+    if (settings.clearToken) apiRef.current?.clear();
+  }, [settings.clearToken, apiRef]);
+
+  // Farbe geändert → bisher Gemaltes umfärben
+  useEffect(() => {
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = settings.color;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
+  }, [settings.color]);
+
+  const stroke = (x: number, y: number) => {
+    const ctx = canvasRef.current!.getContext('2d')!;
+    const { color, brush, mode } = settingsRef.current;
+    ctx.save();
+    if (clipPath.current) ctx.clip(clipPath.current, 'evenodd'); // nicht über die Landesgrenze hinaus
+    ctx.globalCompositeOperation = mode === 'erase' ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = ctx.fillStyle = color;
+    ctx.lineWidth = brush;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    const from = last.current ?? { x, y };
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, brush / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    last.current = { x, y };
+  };
+
+  const pos = (e: React.PointerEvent) => {
+    const r = canvasRef.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  return (
+    <>
+      <canvas
+        ref={canvasRef}
+        className="draw-canvas"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          last.current = null;
+          const p = pos(e);
+          stroke(p.x, p.y);
+        }}
+        onPointerMove={(e) => {
+          const p = pos(e);
+          setCursor(p);
+          if (e.buttons & 1) stroke(p.x, p.y);
+        }}
+        onPointerUp={() => (last.current = null)}
+        onPointerLeave={() => setCursor(null)}
+      />
+      {cursor && (
+        <div
+          className={`brush-cursor ${settings.mode}`}
+          style={{ left: cursor.x, top: cursor.y, width: settings.brush, height: settings.brush, borderColor: settings.color }}
+        />
+      )}
+    </>
   );
 }

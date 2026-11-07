@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { Category, CountryInfo, Meta, RegionGroup, RegionInfo } from '../types';
 
 interface Props {
@@ -8,16 +8,20 @@ interface Props {
   categories: Category[];
   /** admin1-Regionen des Landes (null = noch nicht geladen) */
   regions: Map<string, RegionInfo> | null;
-  regionCounts: Record<string, number>;
   selectedRegions: string[];
   onSelectRegions: (refs: string[]) => void;
   /** admin1-Regionen eines Metas (Gruppen aufgelöst) */
   metaRefs: (m: Meta) => string[];
   /** Gruppe, die genau der aktuellen Auswahl entspricht */
   activeGroup: RegionGroup | null;
-  /** Kategorie der Infografik-Ansicht (null = aus) */
-  infoCategory: number | null;
-  onInfographic: (categoryId: number | null) => void;
+  /** aktive Kategorie aus der Kategorie-Leiste über der Karte (null = alle) – filtert die Liste */
+  activeCategory: number | null;
+  onClearCategory: () => void;
+  /** Anzeigename einer admin1-Region */
+  refName: (ref: string) => string;
+  /** ausgewähltes Meta (Klick auf die Karte in der Liste) – sein eingezeichneter Bereich wird gezeigt */
+  selectedMetaId: number | null;
+  onSelectMeta: (id: number | null) => void;
   onAdd: () => void;
   onEdit: (m: Meta) => void;
   onDelete: (m: Meta) => void;
@@ -35,25 +39,19 @@ function groupByCategory(list: Meta[]): [string, Meta[]][] {
 }
 
 export function CountryPanel({
-  country, metas, loading, categories, regions, regionCounts, selectedRegions, onSelectRegions, metaRefs,
-  activeGroup, infoCategory, onInfographic, onAdd, onEdit, onDelete, onOpenImage,
+  country, metas, loading, categories, regions, selectedRegions, onSelectRegions, metaRefs,
+  activeGroup, activeCategory, onClearCategory, refName, selectedMetaId, onSelectMeta, onAdd, onEdit, onDelete, onOpenImage,
 }: Props) {
-  const [filter, setFilter] = useState<number | 'all'>(infoCategory ?? 'all');
   const hasSelection = selectedRegions.length > 0;
-  const regionName = (ref: string) => regions?.get(ref)?.name ?? ref;
+  const regionName = refName;
   const metaRegionName = (r: Meta['regions'][number]) => (r.ref && regions?.get(r.ref)?.name) || r.name;
-
-  // Infografik folgt dem Kategorie-Filter
-  useEffect(() => {
-    if (infoCategory != null && filter !== infoCategory) onInfographic(filter === 'all' ? null : filter);
-  }, [filter, infoCategory, onInfographic]);
 
   // Sichtbare Metas: die der ausgewählten Region(en) – oder alle Metas des Landes
   const scoped = useMemo(
     () => (hasSelection ? metas.filter((m) => metaRefs(m).some((r) => selectedRegions.includes(r))) : metas),
     [metas, selectedRegions, hasSelection, metaRefs],
   );
-  const visible = filter === 'all' ? scoped : scoped.filter((m) => m.category_id === filter);
+  const visible = activeCategory == null ? scoped : scoped.filter((m) => m.category_id === activeCategory);
   const general = visible.filter((m) => m.regions.length === 0);
   const regional = visible.filter((m) => m.regions.length > 0);
 
@@ -71,98 +69,66 @@ export function CountryPanel({
     return [...out.values()].sort((a, b) => a.names.length - b.names.length || a.names[0].localeCompare(b.names[0], 'de'));
   }, [regional, regions, metaRefs]);
 
-  const usedCategories = categories.filter((c) => scoped.some((m) => m.category_id === c.id));
-  const generalCount = metas.filter((m) => m.regions.length === 0).length;
-  const regionalCount = metas.length - generalCount;
-
-  const regionList = useMemo(
-    () => (regions ? [...regions.values()].sort((a, b) => a.name.localeCompare(b.name, 'de')) : []),
-    [regions],
-  );
+  const activeCat = categories.find((c) => c.id === activeCategory) ?? null;
 
   const renderCards = (list: Meta[], showRegions: boolean) => (
     <div className="cards">
       {list.map((m) => (
-        <article key={m.id} className="card">
+        <article
+          key={m.id}
+          className={`card selectable ${selectedMetaId === m.id ? 'selected' : ''}`}
+          onClick={() => onSelectMeta(selectedMetaId === m.id ? null : m.id)}
+          title={m.area ? 'Klicken: eingezeichneten Bereich auf der Karte zeigen' : 'Klicken: auswählen'}
+        >
           {m.images.length > 0 && (
             <div className="card-images">
               {m.images.map((img) => (
-                <img key={img.id} src={img.url} alt={img.caption || m.title} loading="lazy" onClick={() => onOpenImage(img.url)} />
+                <img key={img.id} src={img.url} alt={img.caption || m.title} loading="lazy"
+                  onClick={(e) => { e.stopPropagation(); onOpenImage(img.url); }} />
               ))}
             </div>
           )}
           <div className="card-body">
             {m.title && <h4>{m.title}</h4>}
+            {m.area && (
+              <div className="card-area">
+                🖌 {selectedMetaId === m.id ? 'Bereich auf der Karte' : 'mit eingezeichnetem Bereich – anklicken'}
+              </div>
+            )}
             {showRegions && m.regions.length > 0 && (
               <div className="card-regions">📍 {m.regions.map(metaRegionName).join(', ')}</div>
             )}
             {m.text && <p>{m.text}</p>}
           </div>
           <div className="card-actions">
-            <button className="btn ghost small" onClick={() => onEdit(m)}>Bearbeiten</button>
-            <button className="btn ghost small danger" onClick={() => onDelete(m)}>Löschen</button>
+            <button className="btn ghost small" onClick={(e) => { e.stopPropagation(); onEdit(m); }}>Bearbeiten</button>
+            <button className="btn ghost small danger" onClick={(e) => { e.stopPropagation(); onDelete(m); }}>Löschen</button>
           </div>
         </article>
       ))}
     </div>
   );
 
-  const infoCat = categories.find((c) => c.id === infoCategory);
-
   return (
     <section className="panel">
       <header className="panel-head">
-        {regionList.length > 0 && (
-          <select
-            className="region-select"
-            value={selectedRegions.length > 1 ? '__multi' : selectedRegions[0] ?? ''}
-            onChange={(e) => onSelectRegions(e.target.value ? [e.target.value] : [])}
-            title="Region auswählen – mehrere mit Strg+Klick auf der Karte"
-          >
-            <option value="">Ganzes Land</option>
-            {selectedRegions.length > 1 && (
-              <option value="__multi" disabled>{activeGroup ? activeGroup.name : `${selectedRegions.length} Regionen ausgewählt`}</option>
-            )}
-            {regionList.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}{regionCounts[r.id] ? ` (${regionCounts[r.id]})` : ''}
-              </option>
-            ))}
-          </select>
+        {activeCat ? (
+          <span className="filter-pill" title="Kategorie aus der Leiste über der Karte">
+            {activeCat.name}
+            <button onClick={onClearCategory} title="Filter aufheben – alle Kategorien zeigen">×</button>
+          </span>
+        ) : (
+          <span className="muted">Alle Kategorien</span>
         )}
-        <div className="chips">
-          <button className={`chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>Alle</button>
-          {usedCategories.map((c) => (
-            <button key={c.id} className={`chip ${filter === c.id ? 'active' : ''}`} onClick={() => setFilter(c.id)}>
-              {c.name}
-            </button>
-          ))}
-          {filter !== 'all' && regionalCount > 0 && (
-            <button
-              className={`chip info-toggle ${infoCategory === filter ? 'active' : ''}`}
-              onClick={() => onInfographic(infoCategory === filter ? null : filter)}
-              title="Metas dieser Kategorie als Infografik auf der Karte zeigen"
-            >
-              🗺 Infografik
-            </button>
-          )}
-        </div>
-        <button className="btn primary" onClick={onAdd}>
+        <span className="muted">{visible.length} Metas</span>
+        <button className="btn primary panel-add" onClick={onAdd}>
           {activeGroup
             ? `+ Meta für ${activeGroup.name}`
             : selectedRegions.length > 1 ? `+ Meta für ${selectedRegions.length} Regionen` : hasSelection ? '+ Regionen-Meta' : '+ Meta'}
         </button>
       </header>
 
-      {infoCat && (
-        <div className="info-bar">
-          <strong>🗺 Infografik: {infoCat.name}</strong>
-          <span className="muted">Jedes Meta ist mit seinen Regionen verbunden · Bild anklicken zum Vergrößern · Karte verschieben/zoomen ordnet die Kästen neu</span>
-          <button className="btn ghost small" onClick={() => onInfographic(null)}>× Beenden</button>
-        </div>
-      )}
-
-      {hasSelection && !infoCat && (
+      {hasSelection && (
         <div className="region-bar">
           <span className="region-pin">📍</span>
           {activeGroup ? (
@@ -175,7 +141,7 @@ export function CountryPanel({
               const region = regions?.get(selectedRegions[0]);
               return (
                 <>
-                  <strong>{region?.name ?? '…'}</strong>
+                  <strong>{region?.name ?? regionName(selectedRegions[0])}</strong>
                   {region && (
                     <span className="muted">
                       {[region.nameEn !== region.name ? region.nameEn : '', region.type, region.code].filter(Boolean).join(' · ')}
@@ -194,18 +160,19 @@ export function CountryPanel({
               ))}
             </span>
           )}
-          <span className="muted">{scoped.length} Metas</span>
           <button className="btn ghost small" onClick={() => onSelectRegions([])}>× Ganzes Land</button>
         </div>
       )}
 
       <div className="panel-body">
         {loading && <p className="muted">Lade…</p>}
-        {!loading && scoped.length === 0 && (
+        {!loading && visible.length === 0 && (
           <div className="empty">
-            {hasSelection
-              ? `Noch keine Metas für ${activeGroup?.name ?? (selectedRegions.length === 1 ? regionName(selectedRegions[0]) : 'diese Regionen')}.`
-              : `Noch keine Metas für ${country.name}.`}
+            {`Noch keine ${activeCat ? `„${activeCat.name}“-` : ''}Metas für ${
+              hasSelection
+                ? activeGroup?.name ?? (selectedRegions.length === 1 ? regionName(selectedRegions[0]) : 'diese Regionen')
+                : country.name
+            }.`}
             <button className="btn primary" onClick={onAdd}>Erstes Meta anlegen</button>
           </div>
         )}

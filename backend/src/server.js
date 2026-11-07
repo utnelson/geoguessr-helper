@@ -64,7 +64,7 @@ function readBody(req, limit) {
 }
 
 async function readJson(req) {
-  const buf = await readBody(req, 1024 * 1024);
+  const buf = await readBody(req, 4 * 1024 * 1024); // gezeichnete Gebiete können etwas größer sein
   if (buf.length === 0) return {};
   try {
     return JSON.parse(buf.toString('utf8'));
@@ -164,6 +164,8 @@ function validateMetaInput(body, partial = false, currentCountry = null) {
   // Titel ist optional – ein Meta kann auch nur aus Bild und/oder Beschreibung bestehen
   if (!partial || body.title !== undefined) out.title = String(body.title ?? '').trim();
   if (!partial || body.text !== undefined) out.text = String(body.text ?? '');
+  // Mit dem Pinsel eingezeichneter Bereich (nur für dieses Meta), null = keiner
+  if (body.area !== undefined) out.area = body.area === null ? null : parseGeometry(body.area);
 
   // Regionen: region_ids (vorhandene Regionen) und/oder admin1 ([{ ref, name }], werden bei Bedarf angelegt).
   // region_id (einzeln) wird aus Kompatibilität weiter akzeptiert.
@@ -244,6 +246,17 @@ function parseColor(v) {
   return String(v).toLowerCase();
 }
 
+/** Gezeichnetes Gebiet: GeoJSON Polygon/MultiPolygon mit [lng, lat]-Koordinaten → JSON-Text */
+function parseGeometry(g) {
+  const polys = g?.type === 'Polygon' ? [g.coordinates] : g?.type === 'MultiPolygon' ? g.coordinates : null;
+  const okPoint = (p) => Array.isArray(p) && p.length >= 2 && p.every((n) => typeof n === 'number' && Number.isFinite(n))
+    && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90;
+  const valid = Array.isArray(polys) && polys.length > 0 && polys.every((rings) =>
+    Array.isArray(rings) && rings.length > 0 && rings.every((r) => Array.isArray(r) && r.length >= 4 && r.every(okPoint)));
+  if (!valid) throw new HttpError(400, 'Ungültige Fläche – bitte neu zeichnen');
+  return JSON.stringify({ type: 'MultiPolygon', coordinates: polys });
+}
+
 function parseMembers(v) {
   if (!Array.isArray(v)) throw new HttpError(400, '"members" muss eine Liste sein');
   const refs = [...new Set(v.map((x) => String(x ?? '').trim()).filter(Boolean))];
@@ -304,7 +317,9 @@ route('GET', '/api/health', () => ({ ok: true }));
 route('GET', '/api/categories', () =>
   db
     .prepare(
-      `SELECT c.id, c.name, c.sort, COUNT(m.id) AS meta_count
+      `SELECT c.id, c.name, c.sort, COUNT(m.id) AS meta_count,
+              -- landesweite Metas (ohne Region) – für die Welt-Infografik
+              COUNT(m.id) FILTER (WHERE NOT EXISTS (SELECT 1 FROM meta_regions mr WHERE mr.meta_id = m.id)) AS general_count
        FROM categories c LEFT JOIN metas m ON m.category_id = c.id
        GROUP BY c.id ORDER BY c.sort, c.name`,
     )
@@ -565,7 +580,8 @@ route('POST', '/api/regions', async ({ req }) => {
   if (!REGION_SOURCES.has(source)) throw new HttpError(400, 'Unbekannte Quelle');
   const ref = body.ref == null || body.ref === '' ? null : String(body.ref);
   if (source === 'admin1' && !ref) throw new HttpError(400, 'Feld "ref" fehlt');
-  const geometry = body.geometry == null ? null : JSON.stringify(body.geometry);
+  if (source === 'custom' && body.geometry == null) throw new HttpError(400, 'Fläche fehlt');
+  const geometry = body.geometry == null ? null : parseGeometry(body.geometry);
 
   if (source === 'admin1') return getRegion(upsertAdmin1Region(country_iso, ref, name));
   const color = parseColor(body.color);
@@ -592,6 +608,9 @@ route('PUT', '/api/regions/:id', async ({ req, params }) => {
     if (body.name !== undefined) db.prepare('UPDATE regions SET name = ? WHERE id = ?').run(requireText(body.name, 'name'), id);
     if (body.color !== undefined) db.prepare('UPDATE regions SET color = ? WHERE id = ?').run(parseColor(body.color), id);
     if (body.members !== undefined && region.source === 'group') setMembers(id, parseMembers(body.members));
+    if (body.geometry !== undefined && region.source === 'custom') {
+      db.prepare('UPDATE regions SET geometry = ? WHERE id = ?').run(parseGeometry(body.geometry), id);
+    }
   });
   return getRegion(id);
 });
@@ -629,8 +648,8 @@ route('POST', '/api/metas', async ({ req }) => {
   const m = validateMetaInput(await readJson(req));
   const id = transaction(() => {
     const r = db
-      .prepare('INSERT INTO metas (country_iso, category_id, title, text) VALUES (?, ?, ?, ?)')
-      .run(m.country_iso, m.category_id, m.title, m.text);
+      .prepare('INSERT INTO metas (country_iso, category_id, title, text, area) VALUES (?, ?, ?, ?, ?)')
+      .run(m.country_iso, m.category_id, m.title, m.text, m.area ?? null);
     const id = Number(r.lastInsertRowid);
     if (m.regions) setMetaRegions(id, m.country_iso, m.regions);
     return id;

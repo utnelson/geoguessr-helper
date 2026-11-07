@@ -116,6 +116,29 @@ export function openDb(file) {
     CREATE INDEX IF NOT EXISTS idx_metas_region ON metas(region_id);
   `);
 
+  // Migration: eingezeichneter Bereich (Pinsel) direkt am Meta – GeoJSON MultiPolygon
+  const metaCols = db.prepare('PRAGMA table_info(metas)').all().map((c) => c.name);
+  if (!metaCols.includes('area')) {
+    db.exec('ALTER TABLE metas ADD COLUMN area TEXT');
+    // Früher gezeichnete eigene Gebiete (regions.source = 'custom') in die zugeordneten Metas übernehmen
+    const customs = db.prepare("SELECT id, geometry FROM regions WHERE source = 'custom' AND geometry IS NOT NULL").all();
+    const linked = db.prepare('SELECT meta_id FROM meta_regions WHERE region_id = ?');
+    const getArea = db.prepare('SELECT area FROM metas WHERE id = ?');
+    const setArea = db.prepare('UPDATE metas SET area = ? WHERE id = ?');
+    for (const c of customs) {
+      const geom = JSON.parse(c.geometry);
+      for (const { meta_id } of linked.all(c.id)) {
+        const prev = getArea.get(meta_id).area;
+        const coords = [...(prev ? JSON.parse(prev).coordinates : []), ...geom.coordinates];
+        setArea.run(JSON.stringify({ type: 'MultiPolygon', coordinates: coords }), meta_id);
+      }
+    }
+    db.exec(`
+      DELETE FROM regions WHERE source = 'custom';
+      UPDATE metas SET region_id = (SELECT region_id FROM meta_regions mr WHERE mr.meta_id = metas.id LIMIT 1);
+    `);
+  }
+
   // App-Einstellungen (JSON-Werte), z.B. ausgeschaltete Länder
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (

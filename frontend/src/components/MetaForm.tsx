@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from 'react';
+import type { MultiPolygon } from 'geojson';
 import { api } from '../api';
-import type { Category, CountryInfo, Meta, MetaImage, RegionGroup, RegionInfo } from '../types';
+import type { Category, CountryInfo, DrawSettings, Meta, MetaImage, RegionGroup, RegionInfo } from '../types';
+import type { DrawApi } from './WorldMap';
+
+/** Farbe für eingezeichnete Bereiche (Zeichnen und Anzeige des ausgewählten Metas) */
+export const AREA_COLOR = '#e64980';
 
 interface Props {
   country: CountryInfo;
   categories: Category[];
   meta: Meta | null; // null = neu anlegen
+  /** vorausgewählte Kategorie für neue Metas (aktive Kategorie der Leiste) */
+  initialCategoryId: number | null;
   regions: Map<string, RegionInfo> | null;
   groups: RegionGroup[];
   /** vorausgewählte admin1-Regionen (adm1_code) / Gruppen für neue Metas, beides leer = ganzes Land */
@@ -14,6 +21,10 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
   onCategoryCreated: (c: Category) => void;
+  /** Pinsel: Zeichenmodus auf der Karte (null = aus) */
+  drawing: DrawSettings | null;
+  onDrawingChange: (s: DrawSettings | null) => void;
+  drawApi: MutableRefObject<DrawApi | null>;
 }
 
 interface PendingFile {
@@ -26,16 +37,36 @@ type PickedRegion = { ref: string | null; id: number | null; name: string; color
 const pickedKey = (r: PickedRegion) => (r.ref ? `ref:${r.ref}` : `id:${r.id}`);
 
 export function MetaForm({
-  country, categories, meta, regions, groups, initialRegionRefs, initialGroupIds, onClose, onSaved, onCategoryCreated,
+  country, categories, meta, initialCategoryId, regions, groups, initialRegionRefs, initialGroupIds, onClose, onSaved,
+  onCategoryCreated, drawing, onDrawingChange, drawApi,
 }: Props) {
-  const [categoryId, setCategoryId] = useState<number>(meta?.category_id ?? categories[0]?.id ?? 0);
+  const named = groups.map((g) => ({ id: g.id, name: g.name, color: g.color }));
+  // Mit dem Pinsel eingezeichneter Bereich – gehört nur zu diesem Meta
+  const [area, setArea] = useState<MultiPolygon | null>(() => {
+    try {
+      return meta?.area ? (JSON.parse(meta.area) as MultiPolygon) : null;
+    } catch {
+      return null;
+    }
+  });
+  const startDraw = () =>
+    onDrawingChange({ area, color: AREA_COLOR, brush: 28, mode: 'paint', clearToken: 0 });
+  /** Gemaltes übernehmen (null, wenn nichts gemalt ist) */
+  const finishDraw = () => {
+    const g = drawApi.current?.toGeometry() ?? null;
+    setArea(g);
+    onDrawingChange(null);
+    return g;
+  };
+  const setDraw = (patch: Partial<DrawSettings>) => drawing && onDrawingChange({ ...drawing, ...patch });
+  const [categoryId, setCategoryId] = useState<number>(meta?.category_id ?? initialCategoryId ?? categories[0]?.id ?? 0);
   const [title, setTitle] = useState(meta?.title ?? '');
   const [text, setText] = useState(meta?.text ?? '');
   const [picked, setPicked] = useState<PickedRegion[]>(() =>
     meta
       ? meta.regions.map((r) => ({ ref: r.ref, id: r.id, name: (r.ref && regions?.get(r.ref)?.name) || r.name, color: r.color }))
       : [
-          ...groups.filter((g) => initialGroupIds.includes(g.id)).map((g) => ({ ref: null, id: g.id, name: g.name, color: g.color })),
+          ...named.filter((g) => initialGroupIds.includes(g.id)).map((g) => ({ ref: null, id: g.id, name: g.name, color: g.color })),
           ...initialRegionRefs.map((ref) => ({ ref, id: null, name: regions?.get(ref)?.name ?? ref })),
         ],
   );
@@ -44,7 +75,7 @@ export function MetaForm({
   // Wert aus dem Dropdown: "ref:<adm1_code>" oder "group:<id>"
   const addRegion = (value: string) => {
     if (value.startsWith('group:')) {
-      const g = groups.find((x) => x.id === Number(value.slice(6)));
+      const g = named.find((x) => x.id === Number(value.slice(6)));
       if (g && !pickedIds.has(g.id)) setPicked((p) => [...p, { ref: null, id: g.id, name: g.name, color: g.color }]);
       return;
     }
@@ -84,10 +115,23 @@ export function MetaForm({
   }, []);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (drawing) onDrawingChange(null); // erst nur das Zeichnen abbrechen
+        else onClose();
+        return;
+      }
+      // Pinsel-Tasten: B Pinsel, E Radierer, + / − Größe
+      const tag = (e.target as HTMLElement).tagName;
+      if (!drawing || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'b') setDraw({ mode: 'paint' });
+      if (e.key === 'e') setDraw({ mode: 'erase' });
+      if (e.key === '-' || e.key === '_') setDraw({ brush: Math.max(4, drawing.brush - 6) });
+      if (e.key === '+' || e.key === '=') setDraw({ brush: Math.min(120, drawing.brush + 6) });
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  });
 
   const createCategory = async () => {
     if (!newCat?.trim()) return;
@@ -106,10 +150,13 @@ export function MetaForm({
     if (!title.trim() && !text.trim() && existing.length + pending.length === 0) {
       return setError('Bitte mindestens Titel, Beschreibung oder ein Bild angeben');
     }
+    // Noch im Zeichenmodus → Gemaltes automatisch übernehmen
+    const finalArea = drawing ? finishDraw() : area;
     setSaving(true);
     setError(null);
     try {
       const input = {
+        area: finalArea,
         country_iso: country.iso,
         category_id: categoryId,
         title: title.trim(),
@@ -163,7 +210,7 @@ export function MetaForm({
               </span>
             ))
           )}
-          {(regionList.length > 0 || groups.length > 0) && (
+          {(regionList.length > 0 || named.length > 0) && (
             <select value="" onChange={(e) => e.target.value && addRegion(e.target.value)}>
               <option value="">+ Region / Gruppe hinzufügen…</option>
               {groups.length > 0 && (
@@ -187,6 +234,42 @@ export function MetaForm({
           )}
         </div>
         {regions === null && <span className="meta-region-hint">Regionen werden geladen…</span>}
+
+        <label>Bereich auf der Karte (optional)</label>
+        {drawing ? (
+          <div className="draw-box">
+            <p className="muted small-hint">
+              Mit gedrückter Maus auf die Karte malen – nur innerhalb von {country.name}.
+              Die Karte ist währenddessen fixiert{area ? ' und auf den Bereich gezoomt' : ', also vorher passend zoomen'}.
+            </p>
+            <div className="row tool-row">
+              <button type="button" className={`btn small ${drawing.mode === 'paint' ? 'primary' : 'ghost'}`}
+                onClick={() => setDraw({ mode: 'paint' })} title="Pinsel (B)">🖌 Pinsel</button>
+              <button type="button" className={`btn small ${drawing.mode === 'erase' ? 'primary' : 'ghost'}`}
+                onClick={() => setDraw({ mode: 'erase' })} title="Radierer (E)">⌫ Radierer</button>
+              <button type="button" className="btn small ghost" onClick={() => setDraw({ clearToken: Date.now() })}>Alles löschen</button>
+            </div>
+            <span className="small-hint">Pinselgröße: {drawing.brush} px</span>
+            <input type="range" min={4} max={120} step={2} value={drawing.brush}
+              onChange={(e) => setDraw({ brush: Number(e.target.value) })} />
+            <span className="muted small-hint">Tasten: B Pinsel · E Radierer · + / − Größe · Esc Zeichnen abbrechen</span>
+            <div className="row">
+              <button type="button" className="btn primary small" onClick={finishDraw}>✓ Bereich übernehmen</button>
+              <button type="button" className="btn ghost small" onClick={() => onDrawingChange(null)}>Abbrechen</button>
+            </div>
+          </div>
+        ) : area ? (
+          <div className="row area-row">
+            <span className="region-chip area-chip">🖌 Bereich eingezeichnet</span>
+            <button type="button" className="btn ghost small" onClick={startDraw}>Bearbeiten</button>
+            <button type="button" className="btn ghost small danger" onClick={() => setArea(null)}>Entfernen</button>
+          </div>
+        ) : (
+          <button type="button" className="btn ghost draw-start" onClick={startDraw}
+            title="Nur für dieses Meta einen Bereich auf die Karte malen">
+            🖌 Bereich einzeichnen
+          </button>
+        )}
 
         <label>Titel (optional)</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="z.B. Gelbe Kennzeichen hinten" autoFocus={!meta} />

@@ -1,9 +1,13 @@
+import type { MultiPolygon } from 'geojson';
+
 export interface Category {
   id: number;
   name: string;
   sort: number;
   /** Anzahl Metas (nur bei GET /api/categories) */
   meta_count?: number;
+  /** davon landesweite Metas (ohne Region) */
+  general_count?: number;
 }
 
 export interface Settings {
@@ -23,6 +27,8 @@ export interface Meta {
   country_iso: string;
   /** Regionen, für die das Meta gilt (leer = ganzes Land) */
   regions: MetaRegion[];
+  /** eingezeichneter Bereich (GeoJSON MultiPolygon als Text), null = keiner */
+  area: string | null;
   category_id: number;
   category_name: string;
   title: string;
@@ -41,6 +47,8 @@ export interface MetaInput {
   region_ids?: number[];
   /** admin1-Regionen – werden bei Bedarf angelegt */
   admin1?: { ref: string; name: string }[];
+  /** eingezeichneter Bereich, null = entfernen */
+  area?: MultiPolygon | null;
 }
 
 export type RegionSource = 'admin1' | 'group' | 'custom';
@@ -109,6 +117,8 @@ export interface InfoItem {
   iso?: string;
   /** fester Ankerpunkt [lng, lat] (sonst aus den Regionen berechnet) */
   anchor?: [number, number];
+  /** Meta-ID, wenn das Meta einen eingezeichneten Bereich hat (wird in der Infografik mit eingefärbt) */
+  areaId?: number;
 }
 
 export interface BackupInfo {
@@ -119,4 +129,23 @@ export interface BackupInfo {
   image_bytes: number;
   /** automatische Sicherungen vor dem letzten Einspielen (Ordner in data/) */
   restore_points: string[];
+}
+
+/** Mit dem Pinsel eingezeichneter Bereich eines Metas (nur sichtbar, wenn das Meta ausgewählt ist) */
+export interface MetaArea {
+  geometry: MultiPolygon;
+  bbox: BBox;
+  /** Punkt im Bereich für Infografik-Linien [lng, lat] */
+  anchor: [number, number];
+}
+
+/** Einstellungen des Zeichenmodus (Pinsel im Meta-Formular) */
+export interface DrawSettings {
+  /** bisher eingezeichneter Bereich (wird vorgemalt), null = neu */
+  area: MultiPolygon | null;
+  color: string;
+  brush: number;
+  mode: 'paint' | 'erase';
+  /** ändert sich bei „Alles löschen“ */
+  clearToken: number;
 }
