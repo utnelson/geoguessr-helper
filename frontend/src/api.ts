@@ -83,5 +83,7 @@ export const api = {
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       body: file,
     }),
+  /** Bildreihenfolge eines Metas setzen (erstes = Titelbild) */
+  orderImages: (metaId: number, ids: number[]) => request<Meta>(`/api/metas/${metaId}/images/order`, json('PUT', { ids })),
   deleteImage: (id: number) => request<void>(`/api/images/${id}`, { method: 'DELETE' }),
 };

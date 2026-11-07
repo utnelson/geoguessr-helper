@@ -27,10 +27,10 @@ interface Props {
   drawApi: MutableRefObject<DrawApi | null>;
 }
 
-interface PendingFile {
-  file: File;
-  preview: string;
-}
+/** Bild im Formular: schon gespeichert oder neu (noch hochzuladen) – gemeinsam sortierbar */
+type ImageItem =
+  | { key: string; kind: 'existing'; img: MetaImage }
+  | { key: string; kind: 'pending'; file: File; preview: string };
 
 /** Region im Formular: admin1 (ref) oder vorhandene Region/Gruppe ohne admin1-Code (id) */
 type PickedRegion = { ref: string | null; id: number | null; name: string; color?: string | null };
@@ -87,9 +87,27 @@ export function MetaForm({
     () => (regions ? [...regions.values()].sort((a, b) => a.name.localeCompare(b.name, 'de')) : []),
     [regions],
   );
-  const [existing, setExisting] = useState<MetaImage[]>(meta?.images ?? []);
+  const [images, setImages] = useState<ImageItem[]>(
+    () => meta?.images.map((img) => ({ key: `e${img.id}`, kind: 'existing' as const, img })) ?? [],
+  );
   const [removed, setRemoved] = useState<number[]>([]);
-  const [pending, setPending] = useState<PendingFile[]>([]);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const removeImage = (item: ImageItem) => {
+    if (item.kind === 'existing') setRemoved((r) => [...r, item.img.id]);
+    else URL.revokeObjectURL(item.preview);
+    setImages((list) => list.filter((x) => x.key !== item.key));
+  };
+  /** Bild an Position `to` verschieben (Drag & Drop bzw. Pfeiltasten) */
+  const moveImage = (key: string, to: number) =>
+    setImages((list) => {
+      const from = list.findIndex((x) => x.key === key);
+      if (from < 0) return list;
+      const next = [...list];
+      const [item] = next.splice(from, 1);
+      next.splice(to > from ? to - 1 : to, 0, item);
+      return next;
+    });
   const [newCat, setNewCat] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +116,13 @@ export function MetaForm({
 
   const addFiles = (files: Iterable<File>) => {
     const imgs = [...files].filter((f) => f.type.startsWith('image/'));
-    setPending((p) => [...p, ...imgs.map((file) => ({ file, preview: URL.createObjectURL(file) }))]);
+    setImages((list) => [
+      ...list,
+      ...imgs.map((file) => {
+        const preview = URL.createObjectURL(file);
+        return { key: preview, kind: 'pending' as const, file, preview };
+      }),
+    ]);
   };
 
   // Screenshots direkt mit Strg+V einfügen
@@ -147,7 +171,7 @@ export function MetaForm({
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim() && !text.trim() && existing.length + pending.length === 0) {
+    if (!title.trim() && !text.trim() && images.length === 0) {
       return setError('Bitte mindestens Titel, Beschreibung oder ein Bild angeben');
     }
     // Noch im Zeichenmodus → Gemaltes automatisch übernehmen
@@ -166,7 +190,12 @@ export function MetaForm({
       };
       const saved = meta ? await api.updateMeta(meta.id, input) : await api.createMeta(input);
       for (const id of removed) await api.deleteImage(id);
-      for (const p of pending) await api.uploadImage(saved.id, p.file);
+      // Neue Bilder hochladen, dann die Reihenfolge der Liste übernehmen
+      const ids: number[] = [];
+      for (const item of images) {
+        ids.push(item.kind === 'existing' ? item.img.id : (await api.uploadImage(saved.id, item.file)).id);
+      }
+      if (ids.length > 1) await api.orderImages(saved.id, ids);
       onSaved();
     } catch (err) {
       setError((err as Error).message);
@@ -290,27 +319,55 @@ export function MetaForm({
           <input ref={fileInput} type="file" accept="image/*" multiple hidden
             onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ''; }} />
         </div>
-        {(existing.length > 0 || pending.length > 0) && (
-          <div className="thumbs">
-            {existing.map((img) => (
-              <div key={img.id} className="thumb">
-                <img src={img.url} alt="" />
-                <button type="button" title="Entfernen" onClick={() => {
-                  setExisting((x) => x.filter((i) => i.id !== img.id));
-                  setRemoved((r) => [...r, img.id]);
-                }}>×</button>
-              </div>
-            ))}
-            {pending.map((p, i) => (
-              <div key={p.preview} className="thumb new">
-                <img src={p.preview} alt="" />
-                <button type="button" title="Entfernen" onClick={() => {
-                  URL.revokeObjectURL(p.preview);
-                  setPending((x) => x.filter((_, j) => j !== i));
-                }}>×</button>
-              </div>
-            ))}
-          </div>
+        {images.length > 0 && (
+          <>
+            <div
+              className="thumbs sortable"
+              onDragOver={(e) => dragKey && e.preventDefault()}
+              onDrop={(e) => {
+                if (!dragKey) return;
+                e.preventDefault();
+                e.stopPropagation();
+                moveImage(dragKey, dropIndex ?? images.length);
+                setDragKey(null);
+                setDropIndex(null);
+              }}
+            >
+              {images.map((item, i) => (
+                <div
+                  key={item.key}
+                  className={`thumb ${item.kind === 'pending' ? 'new' : ''} ${dragKey === item.key ? 'dragging' : ''} ${
+                    dragKey && dropIndex === i ? 'drop-before' : ''
+                  } ${dragKey && dropIndex === i + 1 && i === images.length - 1 ? 'drop-after' : ''}`}
+                  draggable
+                  onDragStart={(e) => {
+                    setDragKey(item.key);
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', item.key); // nötig für Firefox
+                  }}
+                  onDragEnd={() => {
+                    setDragKey(null);
+                    setDropIndex(null);
+                  }}
+                  onDragOver={(e) => {
+                    if (!dragKey) return;
+                    e.preventDefault();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setDropIndex(e.clientX < r.left + r.width / 2 ? i : i + 1);
+                  }}
+                  title="Ziehen zum Sortieren – das erste Bild ist das Titelbild"
+                >
+                  <img src={item.kind === 'existing' ? item.img.url : item.preview} alt="" draggable={false} />
+                  {i === 0 && images.length > 1 && <span className="thumb-badge">Titelbild</span>}
+                  {images.length > 1 && <span className="thumb-num">{i + 1}</span>}
+                  <button type="button" title="Entfernen" onClick={() => removeImage(item)}>×</button>
+                </div>
+              ))}
+            </div>
+            {images.length > 1 && (
+              <span className="meta-region-hint">Bilder per Drag &amp; Drop sortieren – das erste ist das Titelbild in der Infografik.</span>
+            )}
+          </>
         )}
 
         {error && <p className="error">{error}</p>}

@@ -139,6 +139,13 @@ export function openDb(file) {
     `);
   }
 
+  // Migration: Reihenfolge der Bilder eines Metas (erstes Bild = Titelbild der Infografik)
+  const imageCols = db.prepare('PRAGMA table_info(meta_images)').all().map((c) => c.name);
+  if (!imageCols.includes('sort')) {
+    db.exec('ALTER TABLE meta_images ADD COLUMN sort INTEGER NOT NULL DEFAULT 0');
+    db.exec('UPDATE meta_images SET sort = id'); // bisherige Reihenfolge (Upload-Zeitpunkt) beibehalten
+  }
+
   // App-Einstellungen (JSON-Werte), z.B. ausgeschaltete Länder
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (

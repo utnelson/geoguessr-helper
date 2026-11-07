@@ -179,6 +179,12 @@ export function WorldMap({
   const prevInfo = useRef<string[]>([]);
   const prevCountryInfo = useRef<string[]>([]);
   const [, setViewTick] = useState(0);
+  // Infografik-Karussell: aktuelles Bild je Kasten
+  const [slides, setSlides] = useState<Record<string, number>>({});
+  const slide = (key: string, to: number, count: number) =>
+    setSlides((s) => ({ ...s, [key]: (to + count) % count }));
+  // Neue Daten (z.B. Bilder umsortiert) → jeder Kasten startet wieder beim Titelbild
+  useEffect(() => setSlides({}), [infographic]);
 
   // Karte einmalig aufbauen
   useEffect(() => {
@@ -619,7 +625,9 @@ export function WorldMap({
             })}
           </svg>
           {placed.map((c) => {
-            const showImage = !!c.item.image && c.h >= 100;
+            const imgs = c.item.images;
+            const idx = Math.min(slides[c.item.key] ?? 0, Math.max(0, imgs.length - 1));
+            const showImage = imgs.length > 0 && c.h >= 100;
             const showText = !!c.item.text && c.h >= (showImage ? 200 : 90);
             return (
               <div
@@ -631,8 +639,33 @@ export function WorldMap({
               >
                 <div className="info-card-label" style={{ color: c.item.color }}>{c.item.label}</div>
                 {showImage && (
-                  <img src={c.item.image!} alt={c.item.title} onClick={(e) => { e.stopPropagation(); onOpenImage(c.item.image!); }} />
+                  <div className="info-carousel">
+                    <img
+                      src={imgs[idx]}
+                      alt={c.item.title}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenImage(imgs[idx]);
+                      }}
+                    />
+                    {imgs.length > 1 && (
+                      <>
+                        <button className="carousel-btn prev" title="Vorheriges Bild"
+                          onClick={(e) => { e.stopPropagation(); slide(c.item.key, idx - 1, imgs.length); }}>‹</button>
+                        <button className="carousel-btn next" title="Nächstes Bild"
+                          onClick={(e) => { e.stopPropagation(); slide(c.item.key, idx + 1, imgs.length); }}>›</button>
+                        <span className="carousel-count">{idx + 1}/{imgs.length}</span>
+                        <span className="carousel-dots">
+                          {imgs.map((_, k) => (
+                            <i key={k} className={k === idx ? 'on' : ''}
+                              onClick={(e) => { e.stopPropagation(); slide(c.item.key, k, imgs.length); }} />
+                          ))}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 )}
+                {!showImage && imgs.length > 1 && <span className="carousel-count inline">🖼 {imgs.length} Bilder</span>}
                 {c.item.title && <div className="info-card-title">{c.item.title}</div>}
                 {showText && <div className="info-card-text">{c.item.text}</div>}
               </div>

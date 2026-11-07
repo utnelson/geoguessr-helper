@@ -69,7 +69,8 @@ docker-compose.yml
 | DELETE | `/api/regions/:id` | Gruppe löschen; Body `{ members: [{ ref, name }] }` stellt ihre Metas auf die einzelnen Regionen um |
 | POST | `/api/metas` | `{ country_iso, category_id, title?, text, admin1?: [{ ref, name }], region_ids?: [] }` |
 | PUT / DELETE | `/api/metas/:id` | bearbeiten / löschen (Bilder werden mitgelöscht); ohne `admin1`/`region_ids` bleiben die Regionen unverändert |
-| POST | `/api/metas/:id/images` | Body = Bilddatei, `Content-Type: image/*` |
+| POST | `/api/metas/:id/images` | Body = Bilddatei, `Content-Type: image/*` (wird hinten angehängt) |
+| PUT | `/api/metas/:id/images/order` | Bildreihenfolge: `{ ids: [Titelbild, 2., …] }` |
 | DELETE | `/api/images/:id` | Bild löschen |
 
 ### Datenmodell
@@ -124,7 +125,8 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 - **Ländernamen:** Schalter *Aa Ländernamen* oben links auf der Karte. Kleine Länder erscheinen erst beim Zoomen,
   überlappende Namen werden weggelassen.
 - **+ Meta** → Kategorie, Titel, Beschreibung, Bilder per Drag & Drop, Dateiauswahl oder
-  **Screenshot mit Strg+V** einfügen.
+  **Screenshot mit Strg+V** einfügen. Die Vorschaubilder lassen sich **per Drag & Drop sortieren** –
+  das erste ist das **Titelbild** (wird in der Infografik zuerst gezeigt).
 - Länderfarbe zeigt, wie viele Metas du schon hast (grau = noch nichts).
 - Beim Zoom auf ein Land erscheinen die **Regionsgrenzen** (Bundesländer, States, Provinzen …).
   Region auf der Karte anklicken → Zoom auf die Region, Panel zeigt nur deren Metas,
@@ -148,6 +150,8 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 - **Infografik im Land**: Kategorie in der Kategorie-Leiste anklicken (z.B. *Masten*). Die Karte färbt jede Gruppe in ihrer
   Farbe und zeigt pro Meta einen Kasten mit Bild, Titel und Text, verbunden mit einer Linie zur Region;
   landesweite Metas stehen ohne Linie daneben. Beim Verschieben/Zoomen ordnen sich die Kästen neu.
+  Hat ein Meta **mehrere Bilder**, zeigt der Kasten ein Karussell: ‹ › blättern, „2/3“ und Punkte zeigen,
+  wie viele Bilder es gibt (Klick auf einen Punkt springt dorthin, Klick aufs Bild vergrößert).
 
 ## Roadmap
 

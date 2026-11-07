@@ -103,7 +103,7 @@ function getMeta(id) {
     .get(id);
   if (!meta) return null;
   meta.images = db
-    .prepare('SELECT id, filename, caption FROM meta_images WHERE meta_id = ? ORDER BY id')
+    .prepare('SELECT id, filename, caption FROM meta_images WHERE meta_id = ? ORDER BY sort, id')
     .all(id)
     .map(withUrl);
   meta.regions = db
@@ -134,7 +134,7 @@ function listCountryMetas(iso) {
     .prepare(
       `SELECT i.id, i.meta_id, i.filename, i.caption
        FROM meta_images i JOIN metas m ON m.id = i.meta_id
-       WHERE m.country_iso = ? ORDER BY i.id`,
+       WHERE m.country_iso = ? ORDER BY i.sort, i.id`,
     )
     .all(iso);
   const regions = db
@@ -541,7 +541,7 @@ route('GET', '/api/categories/:id/metas', ({ params }) => {
   const images = db
     .prepare(
       `SELECT i.id, i.meta_id, i.filename, i.caption FROM meta_images i
-       JOIN metas m ON m.id = i.meta_id WHERE m.category_id = ? ORDER BY i.id`,
+       JOIN metas m ON m.id = i.meta_id WHERE m.category_id = ? ORDER BY i.sort, i.id`,
     )
     .all(id);
   const byMeta = new Map(metas.map((m) => [m.id, { ...m, images: [], regions: [] }]));
@@ -706,10 +706,28 @@ route('POST', '/api/metas/:id/images', async ({ req, params, url }) => {
   const filename = crypto.randomUUID() + ext;
   await fs.promises.writeFile(path.join(UPLOAD_DIR, filename), data);
   const caption = url.searchParams.get('caption') ?? '';
+  // Neue Bilder hinten anhängen
+  const sort = db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM meta_images WHERE meta_id = ?').get(id).s;
   const r = db
-    .prepare('INSERT INTO meta_images (meta_id, filename, caption) VALUES (?, ?, ?)')
-    .run(id, filename, caption);
+    .prepare('INSERT INTO meta_images (meta_id, filename, caption, sort) VALUES (?, ?, ?, ?)')
+    .run(id, filename, caption, sort);
   return [201, withUrl({ id: Number(r.lastInsertRowid), filename, caption })];
+});
+
+// Bilder eines Metas sortieren: { ids: [Titelbild, 2., 3., …] }
+route('PUT', '/api/metas/:id/images/order', async ({ req, params }) => {
+  const id = Number(params.id);
+  const { ids } = await readJson(req);
+  if (!Array.isArray(ids)) throw new HttpError(400, '"ids" muss eine Liste sein');
+  const own = new Set(db.prepare('SELECT id FROM meta_images WHERE meta_id = ?').all(id).map((r) => r.id));
+  if (ids.length !== own.size || !ids.every((x) => own.has(Number(x)))) {
+    throw new HttpError(400, 'Die Liste muss genau die Bilder dieses Metas enthalten');
+  }
+  transaction(() => {
+    const upd = db.prepare('UPDATE meta_images SET sort = ? WHERE id = ?');
+    ids.forEach((imgId, i) => upd.run(i, Number(imgId)));
+  });
+  return getMeta(id);
 });
 
 route('DELETE', '/api/images/:id', ({ params }) => {

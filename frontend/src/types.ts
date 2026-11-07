@@ -112,7 +112,8 @@ export interface InfoItem {
   label: string;
   title: string;
   text: string;
-  image: string | null;
+  /** Bild-URLs in Reihenfolge (erstes = Titelbild) – mehrere → Karussell */
+  images: string[];
   /** Welt-Infografik: Land, das eingefärbt wird und per Klick geöffnet werden kann */
   iso?: string;
   /** fester Ankerpunkt [lng, lat] (sonst aus den Regionen berechnet) */

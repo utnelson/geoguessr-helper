@@ -574,3 +574,72 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .card.selectable:hover { border-color: #4a6a90; }
 .card.selected { border-color: #e64980; box-shadow: 0 0 0 1px #e64980; }
 .card-area { font-size: 0.78rem; color: #f783ac; margin-bottom: 4px; }
+
+/* ---------- Bilder sortieren (Meta-Formular) ---------- */
+.thumbs.sortable .thumb { cursor: grab; }
+.thumb.dragging { opacity: 0.35; }
+.thumb.drop-before img { box-shadow: -4px 0 0 0 var(--accent); }
+.thumb.drop-after img { box-shadow: 4px 0 0 0 var(--accent); }
+.thumb-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.thumb-num {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  font-size: 0.7rem;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* ---------- Infografik: Bild-Karussell ---------- */
+.info-carousel { position: relative; flex: 1 1 0; min-height: 0; display: flex; }
+.info-carousel img { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; border-radius: 6px; cursor: zoom-in; }
+.carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.carousel-btn:hover { opacity: 1; background: rgba(0, 0, 0, 0.85); }
+.carousel-btn.prev { left: 3px; }
+.carousel-btn.next { right: 3px; }
+.carousel-count {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.carousel-count.inline { position: static; align-self: flex-start; }
+.carousel-dots { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; justify-content: center; gap: 4px; }
+.carousel-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  box-shadow: 0 0 2px #000;
+}
+.carousel-dots i.on { background: #fff; }

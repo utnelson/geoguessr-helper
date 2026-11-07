@@ -227,7 +227,7 @@ export default function App() {
             : area ? '🖌 Bereich' : 'Landesweit',
           title: m.title,
           text: m.text,
-          image: m.images[0]?.url ?? null,
+          images: m.images.map((i) => i.url),
         };
       });
     return items.length ? items : null; // keine Metas dieser Kategorie im Land → normale Karte
@@ -280,7 +280,7 @@ export default function App() {
         label: c.name,
         title: m.title,
         text: m.text,
-        image: m.images[0]?.url ?? null,
+        images: m.images.map((i) => i.url),
       });
     }
     return items;
