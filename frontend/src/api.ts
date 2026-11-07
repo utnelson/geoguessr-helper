@@ -1,4 +1,6 @@
-import type { BackupInfo, Category, Meta, MetaImage, MetaInput, Region, RegionGroup, Settings } from './types';
+import type {
+  Attribute, AttributeValueRow, BackupInfo, Category, Meta, MetaImage, MetaInput, Region, RegionGroup, SearchHit, Settings,
+} from './types';
 
 export interface GroupInput {
   name: string;
@@ -56,6 +58,18 @@ export const api = {
       xhr.onerror = () => reject(new Error('Verbindung abgebrochen'));
       xhr.send(file);
     }),
+
+  // Merkmale (Rückwärtssuche)
+  attributes: () => request<Attribute[]>('/api/attributes'),
+  createAttribute: (a: { category_id: number; key: string; values?: string[] }) =>
+    request<Attribute>('/api/attributes', json('POST', a)),
+  updateAttribute: (id: number, a: { key?: string; values?: string[]; rename?: { from: string; to: string } }) =>
+    request<Attribute>(`/api/attributes/${id}`, json('PUT', a)),
+  deleteAttribute: (id: number) => request<void>(`/api/attributes/${id}`, { method: 'DELETE' }),
+  attributeValues: () => request<AttributeValueRow[]>('/api/attribute-values'),
+
+  /** Volltextsuche über Metas */
+  search: (q: string) => request<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
 
   settings: () => request<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => request<Settings>('/api/settings', json('PUT', s)),

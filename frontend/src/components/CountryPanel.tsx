@@ -22,6 +22,8 @@ interface Props {
   /** ausgewähltes Meta (Klick auf die Karte in der Liste) – sein eingezeichneter Bereich wird gezeigt */
   selectedMetaId: number | null;
   onSelectMeta: (id: number | null) => void;
+  /** Metas, die zu den aktiven Filtern der Rückwärtssuche passen (null = keine Filter) */
+  filterMatchIds: Set<number> | null;
   onAdd: () => void;
   onEdit: (m: Meta) => void;
   onDelete: (m: Meta) => void;
@@ -40,7 +42,7 @@ function groupByCategory(list: Meta[]): [string, Meta[]][] {
 
 export function CountryPanel({
   country, metas, loading, categories, regions, selectedRegions, onSelectRegions, metaRefs,
-  activeGroup, activeCategory, onClearCategory, refName, selectedMetaId, onSelectMeta, onAdd, onEdit, onDelete, onOpenImage,
+  activeGroup, activeCategory, onClearCategory, refName, selectedMetaId, onSelectMeta, filterMatchIds, onAdd, onEdit, onDelete, onOpenImage,
 }: Props) {
   const hasSelection = selectedRegions.length > 0;
   const regionName = refName;
@@ -76,7 +78,7 @@ export function CountryPanel({
       {list.map((m) => (
         <article
           key={m.id}
-          className={`card selectable ${selectedMetaId === m.id ? 'selected' : ''}`}
+          className={`card selectable ${selectedMetaId === m.id ? 'selected' : ''} ${filterMatchIds?.has(m.id) ? 'filter-match' : ''}`}
           onClick={() => onSelectMeta(selectedMetaId === m.id ? null : m.id)}
           title={m.area ? 'Klicken: eingezeichneten Bereich auf der Karte zeigen' : 'Klicken: auswählen'}
         >
@@ -89,6 +91,7 @@ export function CountryPanel({
             </div>
           )}
           <div className="card-body">
+            {filterMatchIds?.has(m.id) && <div className="card-match">🔎 passt zu deinen Filtern</div>}
             {m.title && <h4>{m.title}</h4>}
             {m.area && (
               <div className="card-area">

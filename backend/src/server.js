@@ -112,6 +112,9 @@ function getMeta(id) {
        JOIN regions r ON r.id = mr.region_id WHERE mr.meta_id = ? ORDER BY r.name`,
     )
     .all(id);
+  meta.attributes = db
+    .prepare('SELECT attribute_id, value FROM meta_attributes WHERE meta_id = ? ORDER BY attribute_id, value')
+    .all(id);
   return meta;
 }
 
@@ -145,14 +148,77 @@ function listCountryMetas(iso) {
        WHERE m.country_iso = ? ORDER BY r.name`,
     )
     .all(iso);
-  const byMeta = new Map(metas.map((m) => [m.id, { ...m, images: [], regions: [] }]));
+  const attrs = db
+    .prepare(
+      `SELECT ma.meta_id, ma.attribute_id, ma.value FROM meta_attributes ma
+       JOIN metas m ON m.id = ma.meta_id WHERE m.country_iso = ? ORDER BY ma.attribute_id, ma.value`,
+    )
+    .all(iso);
+  const byMeta = new Map(metas.map((m) => [m.id, { ...m, images: [], regions: [], attributes: [] }]));
   for (const img of images) byMeta.get(img.meta_id)?.images.push(withUrl(img));
   for (const { meta_id, ...r } of regions) byMeta.get(meta_id)?.regions.push(r);
+  for (const { meta_id, ...a } of attrs) byMeta.get(meta_id)?.attributes.push(a);
   return [...byMeta.values()];
+}
+
+// ---------- Merkmale (Rückwärtssuche) ----------
+
+function getAttribute(id) {
+  const a = db.prepare('SELECT id, category_id, key, values_json FROM attributes WHERE id = ?').get(id);
+  if (!a) return null;
+  const { values_json, ...rest } = a;
+  return { ...rest, values: JSON.parse(values_json) };
+}
+
+function parseValues(v) {
+  if (!Array.isArray(v)) throw new HttpError(400, '"values" muss eine Liste sein');
+  return [...new Set(v.map((x) => String(x ?? '').trim()).filter(Boolean))];
+}
+
+/** Merkmale eines Metas setzen: [{ attribute_id, value }] – alle müssen zur Kategorie passen */
+function setMetaAttributes(metaId, categoryId, list) {
+  if (!Array.isArray(list)) throw new HttpError(400, '"attributes" muss eine Liste sein');
+  const rows = [];
+  for (const item of list) {
+    const attr = getAttribute(Number(item?.attribute_id));
+    const value = String(item?.value ?? '');
+    if (!attr) throw new HttpError(400, 'Unbekanntes Merkmal');
+    if (attr.category_id !== categoryId) throw new HttpError(400, `Merkmal „${attr.key}“ gehört zu einer anderen Kategorie`);
+    if (!attr.values.includes(value)) throw new HttpError(400, `„${value}“ ist kein Wert von „${attr.key}“`);
+    rows.push([attr.id, value]);
+  }
+  db.prepare('DELETE FROM meta_attributes WHERE meta_id = ?').run(metaId);
+  const ins = db.prepare('INSERT OR IGNORE INTO meta_attributes (meta_id, attribute_id, value) VALUES (?, ?, ?)');
+  for (const [aid, value] of rows) ins.run(metaId, aid, value);
+}
+
+// ---------- Volltextsuche (FTS5) ----------
+
+/** Suchindex für ein Meta aktualisieren: Titel, Text, Kategorie, Regionen/Gruppen, Merkmale */
+function indexMeta(id) {
+  db.prepare('DELETE FROM meta_fts WHERE rowid = ?').run(id);
+  const m = db
+    .prepare('SELECT m.title, m.text, c.name AS category FROM metas m JOIN categories c ON c.id = m.category_id WHERE m.id = ?')
+    .get(id);
+  if (!m) return;
+  const places = db
+    .prepare('SELECT r.name FROM meta_regions mr JOIN regions r ON r.id = mr.region_id WHERE mr.meta_id = ?')
+    .all(id).map((r) => r.name).join(' ');
+  const attrs = db
+    .prepare('SELECT a.key, ma.value FROM meta_attributes ma JOIN attributes a ON a.id = ma.attribute_id WHERE ma.meta_id = ?')
+    .all(id).map((a) => `${a.key} ${a.value}`).join(' ');
+  db.prepare('INSERT INTO meta_fts (rowid, title, text, category, places, attrs) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, m.title, m.text, m.category, places, attrs);
+}
+
+function rebuildSearchIndex() {
+  db.exec('DELETE FROM meta_fts');
+  for (const { id } of db.prepare('SELECT id FROM metas').all()) indexMeta(id);
 }
 
 function validateMetaInput(body, partial = false, currentCountry = null) {
   const out = {};
+  if (body.attributes !== undefined) out.attributes = body.attributes;
   if (!partial || body.country_iso !== undefined) out.country_iso = normIso(body.country_iso);
   if (!partial || body.category_id !== undefined) {
     const cid = Number(body.category_id);
@@ -358,6 +424,7 @@ route('PUT', '/api/categories/:id', async ({ req, params }) => {
   } catch {
     throw new HttpError(409, 'Kategorie existiert bereits');
   }
+  rebuildSearchIndex();
   return db.prepare('SELECT id, name, sort FROM categories WHERE id = ?').get(id);
 });
 
@@ -377,6 +444,7 @@ route('DELETE', '/api/categories/:id', async ({ req, params }) => {
     }
     db.prepare('DELETE FROM categories WHERE id = ?').run(id);
   });
+  rebuildSearchIndex();
   return [204, null];
 });
 
@@ -477,6 +545,7 @@ route('POST', '/api/backup', async ({ req }) => {
     fs.renameSync(newUploads, UPLOAD_DIR);
   } finally {
     db = openDb(DB_FILE); // auch bei Fehlern wieder eine Datenbank öffnen (Migrationen laufen dabei mit)
+    rebuildSearchIndex();
   }
 
   // Nur die neuesten Sicherungen behalten
@@ -485,6 +554,104 @@ route('POST', '/api/backup', async ({ req }) => {
     fs.rmSync(path.join(DATA_DIR, old), { recursive: true, force: true });
   }
   return { ok: true, metas: metaCount, images, saved_as: path.basename(safety) };
+});
+
+// ---------- Merkmale ----------
+
+route('GET', '/api/attributes', () =>
+  db
+    .prepare(
+      `SELECT a.id, a.category_id, a.key, a.values_json FROM attributes a
+       JOIN categories c ON c.id = a.category_id ORDER BY c.sort, c.name, a.id`,
+    )
+    .all()
+    .map(({ values_json, ...a }) => ({ ...a, values: JSON.parse(values_json) })),
+);
+
+route('POST', '/api/attributes', async ({ req }) => {
+  const body = await readJson(req);
+  const categoryId = Number(body.category_id);
+  if (!db.prepare('SELECT 1 FROM categories WHERE id = ?').get(categoryId)) throw new HttpError(400, 'Unbekannte Kategorie');
+  const key = requireText(body.key, 'key');
+  const values = parseValues(body.values ?? []);
+  try {
+    const r = db.prepare('INSERT INTO attributes (category_id, key, values_json) VALUES (?, ?, ?)')
+      .run(categoryId, key, JSON.stringify(values));
+    return [201, getAttribute(Number(r.lastInsertRowid))];
+  } catch {
+    throw new HttpError(409, `Merkmal „${key}“ gibt es in dieser Kategorie schon`);
+  }
+});
+
+// Bearbeiten: { key?, values?, rename?: { from, to } } – entfernte Werte verschwinden auch an den Metas
+route('PUT', '/api/attributes/:id', async ({ req, params }) => {
+  const id = Number(params.id);
+  const attr = getAttribute(id);
+  if (!attr) throw new HttpError(404, 'Merkmal nicht gefunden');
+  const body = await readJson(req);
+  transaction(() => {
+    if (body.key !== undefined) {
+      try {
+        db.prepare('UPDATE attributes SET key = ? WHERE id = ?').run(requireText(body.key, 'key'), id);
+      } catch (e) {
+        if (e instanceof HttpError) throw e;
+        throw new HttpError(409, 'Merkmal gibt es in dieser Kategorie schon');
+      }
+    }
+    let values = attr.values;
+    if (body.rename) {
+      const from = String(body.rename.from ?? '');
+      const to = requireText(body.rename.to, 'rename.to');
+      if (!values.includes(from)) throw new HttpError(400, `Wert „${from}“ gibt es nicht`);
+      values = [...new Set(values.map((v) => (v === from ? to : v)))];
+      db.prepare('UPDATE OR REPLACE meta_attributes SET value = ? WHERE attribute_id = ? AND value = ?').run(to, id, from);
+    }
+    if (body.values !== undefined) {
+      values = parseValues(body.values);
+      const keep = new Set(values);
+      for (const v of attr.values) {
+        if (!keep.has(v)) db.prepare('DELETE FROM meta_attributes WHERE attribute_id = ? AND value = ?').run(id, v);
+      }
+    }
+    db.prepare('UPDATE attributes SET values_json = ? WHERE id = ?').run(JSON.stringify(values), id);
+  });
+  rebuildSearchIndex();
+  return getAttribute(id);
+});
+
+route('DELETE', '/api/attributes/:id', ({ params }) => {
+  const r = db.prepare('DELETE FROM attributes WHERE id = ?').run(Number(params.id));
+  if (r.changes === 0) throw new HttpError(404, 'Merkmal nicht gefunden');
+  rebuildSearchIndex();
+  return [204, null];
+});
+
+// Alle vergebenen Merkmale aller Metas – die Rückwärtssuche rechnet damit im Browser
+route('GET', '/api/attribute-values', () =>
+  db
+    .prepare(
+      `SELECT ma.meta_id, m.country_iso, ma.attribute_id, ma.value
+       FROM meta_attributes ma JOIN metas m ON m.id = ma.meta_id`,
+    )
+    .all(),
+);
+
+// ---------- Volltextsuche ----------
+
+route('GET', '/api/search', ({ url }) => {
+  const q = String(url.searchParams.get('q') ?? '').trim();
+  const tokens = q.split(/\s+/).map((t) => t.replace(/["*^():]/g, '')).filter(Boolean);
+  if (tokens.length === 0) return [];
+  // Jedes Wort als Präfix, alle Wörter müssen vorkommen (Umlaute/Akzente egal)
+  const match = tokens.map((t) => `"${t}"*`).join(' ');
+  return db
+    .prepare(
+      `SELECT m.id, m.country_iso, m.title, c.name AS category_name,
+              snippet(meta_fts, -1, char(2), char(3), '…', 12) AS snippet
+       FROM meta_fts JOIN metas m ON m.id = meta_fts.rowid JOIN categories c ON c.id = m.category_id
+       WHERE meta_fts MATCH ? ORDER BY rank LIMIT 60`,
+    )
+    .all(match);
 });
 
 // ---------- Einstellungen ----------
@@ -544,7 +711,7 @@ route('GET', '/api/categories/:id/metas', ({ params }) => {
        JOIN metas m ON m.id = i.meta_id WHERE m.category_id = ? ORDER BY i.sort, i.id`,
     )
     .all(id);
-  const byMeta = new Map(metas.map((m) => [m.id, { ...m, images: [], regions: [] }]));
+  const byMeta = new Map(metas.map((m) => [m.id, { ...m, images: [], regions: [], attributes: [] }]));
   for (const img of images) byMeta.get(img.meta_id)?.images.push(withUrl(img));
   return [...byMeta.values()];
 });
@@ -612,6 +779,7 @@ route('PUT', '/api/regions/:id', async ({ req, params }) => {
       db.prepare('UPDATE regions SET geometry = ? WHERE id = ?').run(parseGeometry(body.geometry), id);
     }
   });
+  if (body.name !== undefined) rebuildSearchIndex(); // Gruppenname ist durchsuchbar
   return getRegion(id);
 });
 
@@ -652,6 +820,8 @@ route('POST', '/api/metas', async ({ req }) => {
       .run(m.country_iso, m.category_id, m.title, m.text, m.area ?? null);
     const id = Number(r.lastInsertRowid);
     if (m.regions) setMetaRegions(id, m.country_iso, m.regions);
+    if (m.attributes) setMetaAttributes(id, m.category_id, m.attributes);
+    indexMeta(id);
     return id;
   });
   return [201, getMeta(id)];
@@ -667,7 +837,7 @@ route('PUT', '/api/metas/:id', async ({ req, params }) => {
   const id = Number(params.id);
   const existing = getMeta(id);
   if (!existing) throw new HttpError(404, 'Meta nicht gefunden');
-  const { regions, ...m } = validateMetaInput(await readJson(req), true, existing.country_iso);
+  const { regions, attributes, ...m } = validateMetaInput(await readJson(req), true, existing.country_iso);
   if (m.country_iso && m.country_iso !== existing.country_iso && !regions) {
     throw new HttpError(400, 'Beim Länderwechsel müssen die Regionen neu gesetzt werden');
   }
@@ -679,6 +849,14 @@ route('PUT', '/api/metas/:id', async ({ req, params }) => {
       id,
     );
     if (regions) setMetaRegions(id, m.country_iso ?? existing.country_iso, regions);
+    const categoryId = m.category_id ?? existing.category_id;
+    if (attributes) setMetaAttributes(id, categoryId, attributes);
+    else if (categoryId !== existing.category_id) {
+      // Kategorie gewechselt → Merkmale der alten Kategorie passen nicht mehr
+      db.prepare('DELETE FROM meta_attributes WHERE meta_id = ? AND attribute_id NOT IN (SELECT id FROM attributes WHERE category_id = ?)')
+        .run(id, categoryId);
+    }
+    indexMeta(id);
   });
   return getMeta(id);
 });
@@ -688,6 +866,7 @@ route('DELETE', '/api/metas/:id', ({ params }) => {
   const files = db.prepare('SELECT filename FROM meta_images WHERE meta_id = ?').all(id);
   const r = db.prepare('DELETE FROM metas WHERE id = ?').run(id);
   if (r.changes === 0) throw new HttpError(404, 'Meta nicht gefunden');
+  db.prepare('DELETE FROM meta_fts WHERE rowid = ?').run(id);
   files.forEach((f) => removeUploadFile(f.filename));
   return [204, null];
 });
@@ -789,6 +968,8 @@ const server = http.createServer(async (req, res) => {
     else res.destroy(); // z.B. Abbruch mitten im Download
   }
 });
+
+rebuildSearchIndex();
 
 server.listen(PORT, () => {
   console.log(`GeoGuessr Helper API läuft auf Port ${PORT} (DB: ${DB_FILE})`);

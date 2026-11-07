@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MultiPolygon } from 'geojson';
 import { api } from './api';
 import { CONTINENTS, GROUP_COLORS, geometryInfo, loadCountries, loadRegions, type CountryCollection, type RegionData } from './geo';
-import type { Category, CountryInfo, DrawSettings, InfoItem, Meta, MetaArea, RegionGroup } from './types';
+import type {
+  Attribute, AttributeValueRow, Category, CountryInfo, DrawSettings, Filter, FilterStatus, InfoItem, Meta, MetaArea, RegionGroup,
+  SearchHit,
+} from './types';
+import { computeFilter } from './filters';
+import { SearchBox } from './components/SearchBox';
+import { ActiveFilterBar, FilterPanel } from './components/FilterPanel';
 import { WorldMap, type DrawApi } from './components/WorldMap';
 import { CountryPanel } from './components/CountryPanel';
 import { CategoryBar, CountryBar, GroupBar } from './components/CountryBar';
@@ -52,11 +58,27 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar') === 'collapsed');
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  // Rückwärtssuche: Merkmale, vergebene Werte, aktive Filter, Klappmenü
+  const [attributes, setAttributes] = useState<Attribute[]>([]);
+  const [attributeRows, setAttributeRows] = useState<AttributeValueRow[]>([]);
+  const [filters, setFilters] = useState<Filter[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [optionsTab, setOptionsTab] = useState<'countries' | 'attributes'>('countries');
+  // Volltextsuche: Länder mit Treffern (Kartenmarkierung) und Meta, das nach dem Öffnen ausgewählt wird
+  const [searchHits, setSearchHits] = useState<Set<string> | null>(null);
+  const [pendingMetaId, setPendingMetaId] = useState<number | null>(null);
 
   const refreshStats = useCallback(async () => {
     const s = await api.stats();
     setStats(Object.fromEntries(s.map((x) => [x.iso, x.count])));
+  }, []);
+
+  const loadAttributes = useCallback(async () => {
+    const [a, rows] = await Promise.all([api.attributes(), api.attributeValues()]);
+    setAttributes(a);
+    setAttributeRows(rows);
+    // Filter auf gelöschte Merkmale/Werte verwerfen
+    setFilters((f) => f.filter((x) => a.some((y) => y.id === x.attribute_id && y.values.includes(x.value))));
   }, []);
 
   const loadCategories = useCallback(async () => {
@@ -66,9 +88,10 @@ export default function App() {
   useEffect(() => {
     loadCountries().then(setGeo).catch((e) => setError(e.message));
     loadCategories().catch((e) => setError(`API nicht erreichbar: ${e.message}`));
+    loadAttributes().catch(() => {});
     api.settings().then((s) => setDisabled(new Set(s.disabled_countries))).catch(() => {});
     refreshStats().catch(() => {});
-  }, [refreshStats, loadCategories]);
+  }, [refreshStats, loadCategories, loadAttributes]);
 
   useEffect(() => localStorage.setItem('sidebar', sidebarCollapsed ? 'collapsed' : 'open'), [sidebarCollapsed]);
 
@@ -261,6 +284,19 @@ export default function App() {
   // Ausgeschaltete Länder lassen sich nicht öffnen (auch nicht per Link)
   const country = selectedIso && geo && !disabled.has(selectedIso) ? geo.countries.get(selectedIso) ?? null : null;
 
+  // Rückwärtssuche: welche Länder passen zu den gewählten Merkmalen?
+  const filterResult = useMemo(() => {
+    if (!geo || filters.length === 0) return null;
+    const isos = [...geo.countries.keys()].filter((iso) => !disabled.has(iso));
+    return computeFilter(attributeRows, filters, isos);
+  }, [geo, filters, attributeRows, disabled]);
+  // Karte: Filter-Status je Land – sonst Treffer der Volltextsuche
+  const countryMarks = useMemo<Map<string, FilterStatus> | null>(() => {
+    if (filterResult) return filterResult.status;
+    if (searchHits) return new Map([...searchHits].map((iso) => [iso, 'match' as const]));
+    return null;
+  }, [filterResult, searchHits]);
+
   // Welt-Infografik: ein Kasten pro Land (bzw. Meta), Linie zum Land, Land in Kastenfarbe
   const worldInfographic = useMemo<InfoItem[] | null>(() => {
     if (activeCategory == null || !geo) return null;
@@ -270,6 +306,7 @@ export default function App() {
       if (m.category_id !== activeCategory) continue;
       const c = geo.countries.get(m.country_iso);
       if (!c || disabled.has(c.iso) || (continent && c.continent !== continent.id)) continue;
+      if (filterResult && filterResult.status.get(c.iso) !== 'match') continue; // mit Filtern: nur passende Länder
       if (!colorOf.has(c.iso)) colorOf.set(c.iso, GROUP_COLORS[colorOf.size % GROUP_COLORS.length]);
       items.push({
         key: String(m.id),
@@ -284,7 +321,7 @@ export default function App() {
       });
     }
     return items;
-  }, [activeCategory, worldMetas, geo, continent, disabled]);
+  }, [activeCategory, worldMetas, geo, continent, disabled, filterResult]);
 
   const countryList = useMemo(
     () =>
@@ -294,29 +331,32 @@ export default function App() {
     [geo, disabled],
   );
 
-  const jumpTo = (value: string) => {
-    const v = value.trim().toLowerCase();
-    const hit = countryList.find(
-      (c) => c.name.toLowerCase() === v || c.nameEn.toLowerCase() === v || c.iso.toLowerCase() === v,
-    );
-    if (hit) {
-      select(hit.iso);
-      setSearch('');
-    }
+  // Treffer der Volltextsuche öffnen: Land öffnen, Meta auswählen sobald geladen
+  const openMeta = (hit: SearchHit) => {
+    if (hit.country_iso !== selectedIso) select(hit.country_iso);
+    setPendingMetaId(hit.id);
   };
+  useEffect(() => {
+    if (pendingMetaId == null || !metas.some((m) => m.id === pendingMetaId)) return;
+    setSelectedMetaId(pendingMetaId);
+    setSidebarCollapsed(false);
+    setPendingMetaId(null);
+    // in der Seitenleiste hinscrollen
+    setTimeout(() => document.querySelector('.card.selected')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 100);
+  }, [pendingMetaId, metas]);
 
   const deleteMeta = async (m: Meta) => {
     if (!confirm(`„${m.title || m.category_name}“ wirklich löschen?`)) return;
     await api.deleteMeta(m.id);
     if (selectedIso) await loadMetas(selectedIso);
-    await Promise.all([refreshStats(), loadCategories()]);
+    await Promise.all([refreshStats(), loadCategories(), loadAttributes()]);
   };
 
   const onSaved = async () => {
     setEditing(null);
     setDrawing(null);
     if (selectedIso) await loadMetas(selectedIso);
-    await Promise.all([refreshStats(), loadCategories()]);
+    await Promise.all([refreshStats(), loadCategories(), loadAttributes()]);
   };
 
   // Gruppen aus Natural-Earth-Regionen vorschlagen (z.B. Japan: Tohoku, Kanto, …)
@@ -362,22 +402,41 @@ export default function App() {
       <header className="topbar">
         <h1>🌍 GeoGuessr Helper</h1>
         <span className="muted">{Object.keys(stats).length} Länder · {totalMetas} Metas</span>
-        <input
-          className="search"
-          list="country-list"
-          placeholder="Land suchen…"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            jumpTo(e.target.value);
+        {geo && (
+          <SearchBox
+            countries={countryList}
+            countryNames={geo.countries}
+            onOpenCountry={(iso) => select(iso)}
+            onOpenMeta={openMeta}
+            onHitsChange={setSearchHits}
+          />
+        )}
+        <button
+          className={`btn ${filterOpen || filters.length ? 'primary' : 'ghost'} filter-toggle`}
+          onClick={() => setFilterOpen((v) => !v)}
+          title="Rückwärtssuche: Merkmale anklicken, passende Länder finden"
+        >
+          🔎 Filter{filters.length > 0 && <span className="badge">{filters.length}</span>}
+        </button>
+        <button
+          className="btn ghost"
+          onClick={() => {
+            setOptionsTab('countries');
+            setOptionsOpen((v) => !v);
           }}
-          onKeyDown={(e) => e.key === 'Enter' && jumpTo(search)}
-        />
-        <datalist id="country-list">
-          {countryList.map((c) => <option key={c.iso} value={c.name} />)}
-        </datalist>
-        <button className="btn ghost" onClick={() => setOptionsOpen((v) => !v)} title="Optionen: Länder, Kategorien, Backup">⚙ Optionen</button>
+          title="Optionen: Länder, Kategorien, Merkmale, Backup"
+        >
+          ⚙ Optionen
+        </button>
       </header>
+      <ActiveFilterBar
+        attributes={attributes}
+        categories={categories}
+        filters={filters}
+        onChange={setFilters}
+        matchCount={filterResult?.match.length ?? 0}
+        onOpen={() => setFilterOpen(true)}
+      />
 
       {error && <div className="banner" onClick={() => setError(null)}>{error}</div>}
 
@@ -427,6 +486,7 @@ export default function App() {
           refName={refName}
           selectedMetaId={selectedMetaId}
           onSelectMeta={setSelectedMetaId}
+          filterMatchIds={filterResult?.matchingMetaIds ?? null}
           onAdd={() =>
             setEditing(
               activeGroup
@@ -472,6 +532,25 @@ export default function App() {
           emptyHint={`Noch keine Metas für ${country.name}`}
         />
       )}
+      <div className="map-area">
+      {filterOpen && geo && (
+        <FilterPanel
+          categories={categories}
+          attributes={attributes}
+          rows={attributeRows}
+          filters={filters}
+          onChange={setFilters}
+          result={filterResult}
+          countries={geo.countries}
+          continentId={!country ? continent?.id ?? null : null}
+          onOpenCountry={(iso) => select(iso)}
+          onClose={() => setFilterOpen(false)}
+          onManage={() => {
+            setOptionsTab('attributes');
+            setOptionsOpen(true);
+          }}
+        />
+      )}
       {geo ? (
         <WorldMap
           geojson={geo.geojson}
@@ -493,10 +572,13 @@ export default function App() {
           focusBBox={country ? selectedArea?.bbox ?? null : null}
           drawing={country ? drawing : null}
           drawApi={drawApi}
+          marks={countryMarks}
+          marksFromSearch={!filterResult && !!searchHits}
         />
       ) : (
         <div className="map-wrap loading">Lade Karte…</div>
       )}
+      </div>
       </div>
 
       {editing && country && (
@@ -505,6 +587,8 @@ export default function App() {
           categories={categories}
           meta={editing.meta}
           initialCategoryId={activeCategory}
+          attributes={attributes}
+          onAttributesChanged={loadAttributes}
           regions={regions}
           groups={groups}
           initialRegionRefs={editing.refs}
@@ -543,6 +627,13 @@ export default function App() {
             await loadCategories();
             if (selectedIso) await loadMetas(selectedIso);
           }}
+          attributes={attributes}
+          attributeRows={attributeRows}
+          onAttributesChanged={async () => {
+            await loadAttributes();
+            if (selectedIso) await loadMetas(selectedIso);
+          }}
+          initialTab={optionsTab}
           onClose={() => setOptionsOpen(false)}
         />
       )}

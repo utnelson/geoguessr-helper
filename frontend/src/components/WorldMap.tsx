@@ -4,7 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { MultiPolygon, Polygon } from 'geojson';
 import { geometryInfo, regionsAnchor, type CountryCollection, type RegionData } from '../geo';
 import { paintGeometry, toMultiPolygon, traceMask } from '../brush';
-import type { BBox, CountryInfo, DrawSettings, InfoItem } from '../types';
+import type { BBox, CountryInfo, DrawSettings, FilterStatus, InfoItem } from '../types';
 
 /** Schnittstelle des Zeichenmodus für das Formular (Speichern / Löschen) */
 export interface DrawApi {
@@ -33,6 +33,10 @@ interface Props {
   onToggleLabels: () => void;
   /** ausgeschaltete Länder: grau, nicht anklickbar, Name gedämpft */
   disabled: Set<string>;
+  /** Rückwärtssuche/Volltextsuche: Status je Land (null = keine Markierung) */
+  marks: Map<string, FilterStatus> | null;
+  /** Markierung stammt aus der Volltextsuche (nur Treffer, keine Ausschlüsse) */
+  marksFromSearch: boolean;
   /** eingezeichnete Meta-Bereiche, die gerade sichtbar sein sollen (ausgewähltes Meta, Infografik) */
   metaAreas: { id: number; color: string; geometry: MultiPolygon }[];
   /** Bereich des ausgewählten Metas → dorthin zoomen */
@@ -50,18 +54,29 @@ const HAS_INFO = ['==', ['typeof', STATE('info')], 'string'] as ExpressionSpecif
 
 const DIM = '#1a2531'; // Länder außerhalb des gewählten Kontinents
 const OFF = '#4a4f56'; // ausgeschaltete Länder (Optionen): neutral grau, Karte bleibt erkennbar
+// Rückwärtssuche / Volltextsuche
+const MATCH = '#20c997';
+const UNKNOWN = '#2b3542';
+const EXCLUDED = '#0f1720';
+const MARK = (v: FilterStatus) => ['==', STATE('mark'), v] as ExpressionSpecification;
 const COUNTRY_FILL: ExpressionSpecification = [
   'case',
   IS('dim'), DIM,
   IS('off'), OFF,
+  MARK('excluded'), EXCLUDED,
   IS('selected'), '#f4b400',
   IS('hover'), '#5aa9e6',
+  MARK('match'), MATCH,
+  MARK('unknown'), UNKNOWN,
   ['interpolate', ['linear'], ['to-number', ['coalesce', STATE('count'), 0]], 0, '#34495e', 1, '#2e7d5b', 10, '#43c08a', 25, '#a3e05f'],
 ];
-const COUNTRY_FILL_INFO: ExpressionSpecification = ['case', IS('off'), OFF, IS('selected'), '#e9edf2', IS('hover'), '#5aa9e6', '#34495e'];
+const COUNTRY_FILL_INFO: ExpressionSpecification = [
+  'case', IS('off'), OFF, MARK('excluded'), EXCLUDED, IS('selected'), '#e9edf2', IS('hover'), '#5aa9e6', '#34495e',
+];
 // Welt-Infografik: Länder in der Farbe ihres Kastens
 const COUNTRY_FILL_WORLD_INFO: ExpressionSpecification = [
-  'case', IS('dim'), DIM, IS('off'), OFF, HAS_INFO, ['to-color', STATE('info')], IS('hover'), '#5aa9e6', '#4b5d70',
+  'case', IS('dim'), DIM, IS('off'), OFF, MARK('excluded'), EXCLUDED, HAS_INFO, ['to-color', STATE('info')], IS('hover'), '#5aa9e6',
+  MARK('unknown'), UNKNOWN, '#4b5d70',
 ];
 
 const REGION_FILL: ExpressionSpecification = ['case', IS('selected'), '#e8590c', IS('hover'), '#ffffff', HAS_METAS, '#2e9e6b', '#000000'];
@@ -158,6 +173,7 @@ type Hover = { kind: 'country' | 'region'; id: string; name: string; sub?: strin
 export function WorldMap({
   geojson, countries, stats, selectedIso, onSelect, regionData, regionCounts, selectedRegions, onSelectRegions,
   infographic, onOpenImage, continent, showLabels, onToggleLabels, disabled, metaAreas, focusBBox, drawing, drawApi,
+  marks, marksFromSearch,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -368,6 +384,15 @@ export function WorldMap({
       map.setFeatureState({ source: 'countries', id: iso }, { count: stats[iso] ?? 0 });
     }
   }, [ready, stats, countries]);
+
+  // Rückwärtssuche / Volltextsuche: Status je Land
+  useEffect(() => {
+    const map = loadedRef.current ? mapRef.current : null;
+    if (!ready || !map) return;
+    for (const iso of countries.keys()) {
+      map.setFeatureState({ source: 'countries', id: iso }, { mark: marks?.get(iso) ?? null });
+    }
+  }, [ready, countries, marks]);
 
   // Ausgeschaltete Länder
   useEffect(() => {
@@ -684,7 +709,17 @@ export function WorldMap({
         </div>
       )}
       {!infographic && <div className="map-legend">
-        {selectedIso ? (
+        {marks ? (
+          marksFromSearch ? (
+            <span><i style={{ background: MATCH }} /> Treffer der Suche</span>
+          ) : (
+            <>
+              <span><i style={{ background: MATCH }} /> passt</span>
+              <span><i style={{ background: UNKNOWN }} /> ohne Angabe</span>
+              <span><i style={{ background: EXCLUDED, outline: '1px solid #3a4b5f' }} /> ausgeschlossen</span>
+            </>
+          )
+        ) : selectedIso ? (
           <>
             <span><i style={{ background: '#2e9e6b' }} /> Region mit Metas</span>
             <span><i style={{ background: '#e8590c' }} /> ausgewählt{multi ? ` (${selectedRegions.length})` : ''}</span>

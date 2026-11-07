@@ -56,6 +56,10 @@ docker-compose.yml
 | PUT | `/api/categories/:id` | umbenennen: `{ name }` |
 | PUT | `/api/categories/order` | Reihenfolge: `{ ids: [...] }` |
 | DELETE | `/api/categories/:id` | löschen; genutzte nur mit `{ move_to: <id> }` (Metas wandern dorthin) |
+| GET / POST | `/api/attributes` | Merkmale je Kategorie: `{ category_id, key, values: [] }` |
+| PUT / DELETE | `/api/attributes/:id` | bearbeiten (`key`, `values`, `rename: { from, to }`) / löschen |
+| GET | `/api/attribute-values` | alle vergebenen Merkmale `{ meta_id, country_iso, attribute_id, value }` (Rückwärtssuche) |
+| GET | `/api/search?q=` | Volltextsuche über Metas (Titel, Text, Kategorie, Regionen/Gruppen, Merkmale) |
 | GET / PUT | `/api/settings` | Einstellungen, z.B. `{ disabled_countries: ["AQ", …] }` |
 | GET | `/api/backup` | Backup als ZIP herunterladen (`geo.db` + `uploads/`) |
 | POST | `/api/backup` | Backup einspielen, Body = ZIP (alter Stand → `data/vor-restore-…`) |
@@ -84,8 +88,9 @@ docker-compose.yml
   abgeschnitten). Frühere „eigene Gebiete“ (`regions.source = 'custom'`) werden beim Start in ihre Metas übernommen.
 - **Regionsgruppen**: `regions.source = 'group'` mit `color`, Mitglieder (admin1-`ref`s) in `region_members`.
   Ein Meta kann einer Gruppe zugeordnet sein – ändert man die Gruppe, gilt das Meta automatisch für die neuen Mitglieder.
-- `attributes` / `meta_attributes` – strukturierte Merkmale für die Rückwärtssuche,
-  z.B. Kategorie *Masten*: `Form = rund`, `Muster = Waffel`
+- `attributes` / `meta_attributes` – Merkmale für die Rückwärtssuche, z.B. Kategorie *Masten*:
+  `Muster` = Waffel / Löcher / glatt; ein Meta kann mehrere Werte haben
+- `meta_fts` – FTS5-Volltextindex (wird beim Start und bei Änderungen neu aufgebaut, nicht separat sichern)
 
 Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 
@@ -113,6 +118,19 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
   Betrieb kopieren – dann fehlen evtl. Änderungen aus `geo.db-wal`.
 - **Proxmox:** den Docker-LXC in die Proxmox-Backups aufnehmen (Snapshot-Modus).
 - Die App hat keinen Login: Wer sie erreicht, kann auch ein Backup einspielen. Nur geschützt (VPN / Proxy mit Login) freigeben.
+- **🔎 Rückwärtssuche** (Knopf *Filter* oben): klappt links über der Karte ein Menü auf. Werte anklicken, die du
+  im Spiel siehst (z.B. *Masten › Muster: Waffel*, *Kennzeichen › Farbe hinten: gelb*) → die Karte färbt sofort:
+  **türkis = passt**, grau = ohne Angabe (Land hat dazu noch kein Meta), **dunkel = ausgeschlossen**.
+  Oben im Menü stehen die passenden Länder zum Anklicken. Mehrere Werte eines Merkmals = *oder*, verschiedene
+  Merkmale = *und*. *Einklappen* behält die Filter – sie stehen dann als Leiste unter der Kopfzeile (× entfernt
+  einzelne). Mit aktiven Filtern zeigt die Welt-Infografik nur passende Länder, in der Seitenleiste sind
+  passende Metas grün markiert.
+  - **Merkmale festlegen:** ⚙ Optionen → *Merkmale* (pro Kategorie Merkmal + Werte; Wert anklicken = umbenennen).
+  - **Metas taggen:** im Meta-Formular unter *Merkmale* die Werte anklicken – fehlende Werte/Merkmale lassen
+    sich dort direkt ergänzen.
+- **Volltextsuche** (Suchfeld oben): findet Länder und Metas – Titel, Beschreibung, Kategorie, Regionen/Gruppen
+  und Merkmale, Wortanfänge reichen, Umlaute egal (`waffel`, `gelbe kenn`, `kansai`). Länder mit Treffern werden
+  auf der Karte markiert; Klick auf einen Treffer öffnet das Land und wählt das Meta aus. Pfeiltasten + Enter, Esc.
 - **Kontinente:** In der Weltansicht oben *Europa*, *Asien* … wählen → Karte zoomt hin, andere Länder werden
   abgedunkelt. Die Auswahl bleibt gespeichert (auch nach Rückkehr aus einem Land).
 - **Kategorie-Leiste** (🗺 Kategorie, unter den Kontinenten bzw. unter den Gruppen): Klick auf eine Kategorie
@@ -159,6 +177,11 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 2. ✅ Regionen: admin1-Grenzen (Natural Earth 10m) beim Zoom einblenden, Regionen-Metas auf der Karte
    - ✅ Regionsgruppen (inkl. Vorschlag aus Natural Earth) und Infografik-Ansicht pro Kategorie
    - ✅ Bereiche je Meta mit dem Pinsel einzeichnen (`metas.area`, GeoJSON MultiPolygon)
-3. Attribute pro Kategorie + **Rückwärtssuche** („runder Mast mit Waffelmuster“ → Länder werden auf
-   der Karte markiert)
-4. Lernmodus: Quiz (Bild → Land auf Karte klicken), Karteikarten mit Spaced Repetition, Statistik
+3. ✅ Merkmale pro Kategorie + **Rückwärtssuche** („Mast mit Waffelmuster“ → passende Länder auf der Karte)
+   und **Volltextsuche** (SQLite FTS5)
+4. **Bilderkennung** als zusätzliche Container-Dienste:
+   - **Bild-Ähnlichkeitssuche (CLIP, z.B. OpenCLIP)**: Screenshot eines Masts/Pollers/Schilds einfügen →
+     ähnlichste Bilder aus den eigenen Metas → Länder. Embeddings der Meta-Bilder beim Upload berechnen.
+   - **OCR (Tesseract / PaddleOCR)**: Schrift auf Schildern erkennen → Schriftsystem und typische
+     Sonderzeichen (ğ, ő, ł, ß …) → passende Länder vorschlagen bzw. als Filter übernehmen.
+5. Lernmodus: Quiz (Bild → Land auf Karte klicken), Karteikarten mit Spaced Repetition, Statistik

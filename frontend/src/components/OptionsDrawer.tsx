@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { CONTINENTS } from '../geo';
-import type { BackupInfo, Category, CountryInfo } from '../types';
+import type { Attribute, AttributeValueRow, BackupInfo, Category, CountryInfo } from '../types';
+import { AttributesTab } from './AttributesTab';
 
 interface Props {
   countries: Map<string, CountryInfo>;
@@ -10,6 +11,11 @@ interface Props {
   onDisabledChange: (isos: string[]) => Promise<void>;
   categories: Category[];
   onCategoriesChanged: () => Promise<void>;
+  attributes: Attribute[];
+  attributeRows: AttributeValueRow[];
+  onAttributesChanged: () => Promise<void>;
+  /** Tab beim Öffnen */
+  initialTab?: 'countries' | 'attributes';
   onClose: () => void;
 }
 
@@ -17,8 +23,11 @@ const CONTINENT_NAMES: Record<string, string> = Object.fromEntries(CONTINENTS.ma
 const continentName = (id: string) => CONTINENT_NAMES[id] ?? (id === 'Antarctica' ? 'Antarktis' : 'Sonstige');
 
 /** Optionen: Länder ein-/ausschalten, Kategorien verwalten */
-export function OptionsDrawer({ countries, disabled, stats, onDisabledChange, categories, onCategoriesChanged, onClose }: Props) {
-  const [tab, setTab] = useState<'countries' | 'categories' | 'backup'>('countries');
+export function OptionsDrawer({
+  countries, disabled, stats, onDisabledChange, categories, onCategoriesChanged, attributes, attributeRows, onAttributesChanged,
+  initialTab = 'countries', onClose,
+}: Props) {
+  const [tab, setTab] = useState<'countries' | 'categories' | 'attributes' | 'backup'>(initialTab);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -36,10 +45,14 @@ export function OptionsDrawer({ countries, disabled, stats, onDisabledChange, ca
         <div className="tabs">
           <button className={`tab ${tab === 'countries' ? 'active' : ''}`} onClick={() => setTab('countries')}>Länder</button>
           <button className={`tab ${tab === 'categories' ? 'active' : ''}`} onClick={() => setTab('categories')}>Kategorien</button>
+          <button className={`tab ${tab === 'attributes' ? 'active' : ''}`} onClick={() => setTab('attributes')}>Merkmale</button>
           <button className={`tab ${tab === 'backup' ? 'active' : ''}`} onClick={() => setTab('backup')}>Backup</button>
         </div>
         {tab === 'countries' && <CountriesTab countries={countries} disabled={disabled} stats={stats} onChange={onDisabledChange} />}
         {tab === 'categories' && <CategoriesTab categories={categories} onChanged={onCategoriesChanged} />}
+        {tab === 'attributes' && (
+          <AttributesTab categories={categories} attributes={attributes} rows={attributeRows} onChanged={onAttributesChanged} />
+        )}
         {tab === 'backup' && <BackupTab />}
       </div>
     </aside>

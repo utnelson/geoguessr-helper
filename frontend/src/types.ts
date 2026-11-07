@@ -29,6 +29,8 @@ export interface Meta {
   regions: MetaRegion[];
   /** eingezeichneter Bereich (GeoJSON MultiPolygon als Text), null = keiner */
   area: string | null;
+  /** vergebene Merkmale (Rückwärtssuche) */
+  attributes: MetaAttribute[];
   category_id: number;
   category_name: string;
   title: string;
@@ -49,6 +51,8 @@ export interface MetaInput {
   admin1?: { ref: string; name: string }[];
   /** eingezeichneter Bereich, null = entfernen */
   area?: MultiPolygon | null;
+  /** Merkmale (ersetzt alle bisherigen) */
+  attributes?: MetaAttribute[];
 }
 
 export type RegionSource = 'admin1' | 'group' | 'custom';
@@ -149,4 +153,40 @@ export interface DrawSettings {
   mode: 'paint' | 'erase';
   /** ändert sich bei „Alles löschen“ */
   clearToken: number;
+}
+
+// ---------- Rückwärtssuche ----------
+
+/** Merkmal einer Kategorie, z.B. Masten → „Muster“: Waffel, Löcher, glatt */
+export interface Attribute {
+  id: number;
+  category_id: number;
+  key: string;
+  values: string[];
+}
+
+export interface MetaAttribute {
+  attribute_id: number;
+  value: string;
+}
+
+/** Ein vergebenes Merkmal (für die Filterberechnung über alle Länder) */
+export interface AttributeValueRow extends MetaAttribute {
+  meta_id: number;
+  country_iso: string;
+}
+
+/** Aktiver Filter: Merkmal = Wert */
+export type Filter = MetaAttribute;
+
+/** Ergebnis je Land: passt / ohne Angabe / ausgeschlossen */
+export type FilterStatus = 'match' | 'unknown' | 'excluded';
+
+export interface SearchHit {
+  id: number;
+  country_iso: string;
+  title: string;
+  category_name: string;
+  /** Ausschnitt; Treffer sind mit  …  markiert */
+  snippet: string;
 }

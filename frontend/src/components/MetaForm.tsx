@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import type { MultiPolygon } from 'geojson';
 import { api } from '../api';
-import type { Category, CountryInfo, DrawSettings, Meta, MetaImage, RegionGroup, RegionInfo } from '../types';
+import type { Attribute, Category, CountryInfo, DrawSettings, Meta, MetaImage, RegionGroup, RegionInfo } from '../types';
 import type { DrawApi } from './WorldMap';
 
 /** Farbe für eingezeichnete Bereiche (Zeichnen und Anzeige des ausgewählten Metas) */
@@ -21,6 +21,9 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
   onCategoryCreated: (c: Category) => void;
+  /** Merkmale aller Kategorien (Rückwärtssuche) */
+  attributes: Attribute[];
+  onAttributesChanged: () => Promise<void>;
   /** Pinsel: Zeichenmodus auf der Karte (null = aus) */
   drawing: DrawSettings | null;
   onDrawingChange: (s: DrawSettings | null) => void;
@@ -38,7 +41,7 @@ const pickedKey = (r: PickedRegion) => (r.ref ? `ref:${r.ref}` : `id:${r.id}`);
 
 export function MetaForm({
   country, categories, meta, initialCategoryId, regions, groups, initialRegionRefs, initialGroupIds, onClose, onSaved,
-  onCategoryCreated, drawing, onDrawingChange, drawApi,
+  onCategoryCreated, drawing, onDrawingChange, drawApi, attributes, onAttributesChanged,
 }: Props) {
   const named = groups.map((g) => ({ id: g.id, name: g.name, color: g.color }));
   // Mit dem Pinsel eingezeichneter Bereich – gehört nur zu diesem Meta
@@ -60,6 +63,43 @@ export function MetaForm({
   };
   const setDraw = (patch: Partial<DrawSettings>) => drawing && onDrawingChange({ ...drawing, ...patch });
   const [categoryId, setCategoryId] = useState<number>(meta?.category_id ?? initialCategoryId ?? categories[0]?.id ?? 0);
+  // Merkmale: gewählte Werte als "attributId:wert"
+  const [tags, setTags] = useState<Set<string>>(
+    () => new Set((meta?.attributes ?? []).map((a) => `${a.attribute_id}:${a.value}`)),
+  );
+  const [newTagValue, setNewTagValue] = useState<Record<number, string>>({});
+  const [newAttrKey, setNewAttrKey] = useState('');
+  const catAttributes = attributes.filter((a) => a.category_id === categoryId);
+  const toggleTag = (k: string) =>
+    setTags((t) => {
+      const n = new Set(t);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  const addTagValue = async (a: Attribute) => {
+    const v = (newTagValue[a.id] ?? '').trim();
+    if (!v) return;
+    try {
+      if (!a.values.includes(v)) await api.updateAttribute(a.id, { values: [...a.values, v] });
+      await onAttributesChanged();
+      setTags((t) => new Set(t).add(`${a.id}:${v}`));
+      setNewTagValue((n) => ({ ...n, [a.id]: '' }));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const addAttr = async () => {
+    const key = newAttrKey.trim();
+    if (!key) return;
+    try {
+      await api.createAttribute({ category_id: categoryId, key, values: [] });
+      await onAttributesChanged();
+      setNewAttrKey('');
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const [title, setTitle] = useState(meta?.title ?? '');
   const [text, setText] = useState(meta?.text ?? '');
   const [picked, setPicked] = useState<PickedRegion[]>(() =>
@@ -179,8 +219,16 @@ export function MetaForm({
     setSaving(true);
     setError(null);
     try {
+      const ownAttrIds = new Set(catAttributes.map((a) => a.id));
       const input = {
         area: finalArea,
+        // nur Merkmale der aktuellen Kategorie (nach Kategoriewechsel fallen die alten weg)
+        attributes: [...tags]
+          .map((k) => {
+            const i = k.indexOf(':');
+            return { attribute_id: Number(k.slice(0, i)), value: k.slice(i + 1) };
+          })
+          .filter((t) => ownAttrIds.has(t.attribute_id)),
         country_iso: country.iso,
         category_id: categoryId,
         title: title.trim(),
@@ -225,6 +273,46 @@ export function MetaForm({
             <button type="button" className="btn ghost" onClick={() => setNewCat(null)}>Abbrechen</button>
           </div>
         )}
+
+        <label>Merkmale <span className="muted">(für die Rückwärtssuche 🔎)</span></label>
+        <div className="tag-box">
+          {catAttributes.length === 0 && (
+            <span className="muted small-hint">
+              Für diese Kategorie gibt es noch keine Merkmale – hier eins anlegen (z.B. „Muster“) oder in ⚙ Optionen → Merkmale.
+            </span>
+          )}
+          {catAttributes.map((a) => (
+            <div key={a.id} className="tag-row">
+              <span className="tag-key">{a.key}</span>
+              <span className="value-chips">
+                {a.values.map((v) => {
+                  const k = `${a.id}:${v}`;
+                  return (
+                    <button type="button" key={k} className={`chip ${tags.has(k) ? 'active' : ''}`} onClick={() => toggleTag(k)}>
+                      {v}
+                    </button>
+                  );
+                })}
+                <input
+                  className="value-add"
+                  placeholder="+ Wert"
+                  value={newTagValue[a.id] ?? ''}
+                  onChange={(e) => setNewTagValue((n) => ({ ...n, [a.id]: e.target.value }))}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTagValue(a))}
+                />
+              </span>
+            </div>
+          ))}
+          <div className="row tag-new">
+            <input
+              placeholder="+ neues Merkmal, z.B. Farbe"
+              value={newAttrKey}
+              onChange={(e) => setNewAttrKey(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addAttr())}
+            />
+            {newAttrKey.trim() && <button type="button" className="btn ghost small" onClick={addAttr}>Anlegen</button>}
+          </div>
+        </div>
 
         <label>Gilt für</label>
         <div className="region-picker">

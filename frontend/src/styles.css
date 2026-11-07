@@ -31,7 +31,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Hauptbereich: Karte links, Seitenleiste (Panel bzw. Formulare) rechts */
 .main { flex: 1; min-height: 0; display: flex; position: relative; }
 .main > .map-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.map-col > .map-wrap { flex: 1; min-height: 0; }
+/* Kartenbereich: Karte + aufklappbares Filter-Menü links darüber */
+.map-area { flex: 1; min-height: 0; position: relative; display: flex; }
+.map-area > .map-wrap { flex: 1; min-width: 0; }
 .main > .panel { order: 2; flex: 0 0 var(--side-w); border-left: 2px solid var(--accent); }
 
 .topbar {
@@ -45,8 +47,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .topbar h1 { font-size: 1.1rem; margin: 0; white-space: nowrap; }
 .topbar .search {
-  margin-left: auto;
-  width: min(280px, 40vw);
+  width: min(380px, 42vw);
   padding: 7px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -643,3 +644,93 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
   box-shadow: 0 0 2px #000;
 }
 .carousel-dots i.on { background: #fff; }
+
+/* ---------- Suchfeld (Länder + Volltextsuche) ---------- */
+.searchbox { position: relative; margin-left: auto; display: flex; align-items: center; }
+.search-clear {
+  position: absolute; right: 8px; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem;
+}
+.search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(520px, 90vw);
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  padding: 6px;
+}
+.search-section { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); padding: 6px 8px 2px; }
+.search-section .muted { text-transform: none; letter-spacing: 0; }
+.search-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  background: none; border: none; text-align: left; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+}
+.search-item.active { background: var(--surface-2); }
+.search-snippet { font-size: 0.82rem; color: #c8d5e3; }
+.search-snippet mark { background: rgba(244, 180, 0, 0.35); color: inherit; border-radius: 2px; }
+.search-empty { padding: 6px 8px; }
+
+/* ---------- Rückwärtssuche ---------- */
+.filter-toggle { position: relative; }
+.badge {
+  margin-left: 6px; background: var(--accent-text); color: var(--accent); border-radius: 999px;
+  padding: 0 6px; font-size: 0.75rem; font-weight: 700;
+}
+.btn.ghost .badge { background: var(--accent); color: var(--accent-text); }
+.active-filter-bar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 5px 16px;
+  background: rgba(32, 201, 151, 0.12); border-bottom: 1px solid #20c997; font-size: 0.85rem;
+}
+.filter-chip { border-color: #20c997; background: rgba(32, 201, 151, 0.18); }
+.filter-panel {
+  position: absolute; top: 0; left: 0; bottom: 0; width: min(340px, 85%); z-index: 6;
+  background: var(--surface); border-right: 2px solid #20c997; box-shadow: 8px 0 24px rgba(0, 0, 0, 0.35);
+  overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.filter-head { display: flex; align-items: center; justify-content: space-between; }
+.filter-result { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.match-count { color: #20c997; font-size: 1.2rem; }
+.candidate-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip.candidate { border-color: #20c997; }
+.chip.candidate:hover { background: rgba(32, 201, 151, 0.25); }
+.filter-search, .tag-new input, .attr-add input {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; width: 100%;
+}
+.filter-group h4 { margin: 6px 0 4px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); }
+.filter-attr, .tag-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.tag-key { flex: 0 0 auto; min-width: 70px; font-size: 0.8rem; color: var(--muted); }
+.value-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip.empty { opacity: 0.5; }
+.filter-panel .chip.active, .tag-box .chip.active { background: #20c997; border-color: #20c997; color: #052b20; }
+.filter-rules { margin-top: auto; }
+.filter-empty { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.value-add {
+  width: 90px !important; padding: 2px 8px !important; border-radius: 999px !important;
+  border: 1px dashed var(--border) !important; background: transparent !important; font-size: 0.8rem;
+}
+
+/* Meta-Formular: Merkmale */
+.tag-box { border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.tag-new input { font-size: 0.85rem; }
+
+/* Optionen: Merkmale */
+.attr-options { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.attr-options details { border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+.attr-options summary { cursor: pointer; padding: 4px 0; }
+.attr-option { border-top: 1px solid var(--border); padding: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.attr-key { font-weight: 600; }
+.value-chip {
+  display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; font-size: 0.82rem;
+}
+.value-chip button { background: none; border: none; cursor: pointer; padding: 2px 6px; }
+.value-chip .value-name { padding-left: 10px; }
+.attr-add { margin: 6px 0 4px; }
+
+/* Seitenleiste: zu den Filtern passende Metas */
+.card.filter-match { border-color: #20c997; }
+.card-match { font-size: 0.75rem; color: #20c997; font-weight: 600; margin-bottom: 2px; }

@@ -146,6 +146,14 @@ export function openDb(file) {
     db.exec('UPDATE meta_images SET sort = id'); // bisherige Reihenfolge (Upload-Zeitpunkt) beibehalten
   }
 
+  // Volltextsuche über Metas (wird beim Start und bei Änderungen neu befüllt, siehe server.js)
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS meta_fts USING fts5(
+      title, text, category, places, attrs,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+  `);
+
   // App-Einstellungen (JSON-Werte), z.B. ausgeschaltete Länder
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
