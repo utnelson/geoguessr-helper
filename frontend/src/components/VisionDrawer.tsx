@@ -140,15 +140,26 @@ export function VisionDrawer({ countries, disabled, onOpenCountry, onOpenMeta, o
           <button className="btn ghost small" onClick={onClose} title="Schließen (Esc)">✕</button>
         </div>
 
-        <p className="muted small-hint vision-status">
-          {!status
-            ? 'Prüfe Bilderkennung…'
-            : !status.configured
-              ? '⚠ Nicht eingerichtet – im docker-compose fehlt der vision-Container bzw. VISION_URL.'
-              : !status.available
-                ? '⚠ vision-Container nicht erreichbar (startet noch oder läuft nicht).'
-                : `✓ Bereit · ${status.indexed}/${status.total} Bilder für die Ähnlichkeitssuche indexiert${status.indexing ? ' (läuft…)' : ''}`}
-        </p>
+        <div className="muted small-hint vision-status">
+          {!status ? (
+            'Prüfe Bilderkennung…'
+          ) : (
+            <>
+              <div>
+                🔤 Texterkennung (OCR):{' '}
+                {!status.ocr.configured ? 'nicht aktiviert' : status.ocr.available ? '✓ bereit' : '⚠ Container „ocr“ nicht erreichbar'}
+              </div>
+              <div>
+                🔍 Bildsuche (CLIP):{' '}
+                {!status.clip.configured
+                  ? 'nicht aktiviert (optional, siehe README → „CLIP aktivieren“)'
+                  : !status.clip.available
+                    ? '⚠ Container „clip“ nicht erreichbar'
+                    : `✓ bereit · ${status.clip.indexed}/${status.clip.total} Bilder indexiert${status.clip.indexing ? ' (läuft…)' : ''}`}
+              </div>
+            </>
+          )}
+        </div>
 
         {!src ? (
           <div
@@ -203,11 +214,11 @@ export function VisionDrawer({ countries, disabled, onOpenCountry, onOpenMeta, o
         }} />
 
         <div className="row vision-actions">
-          <button className="btn primary" disabled={!src || !!busy || !status?.available} onClick={() => run('similar')}
-            title="CLIP: vergleicht das Bild mit allen Bildern deiner Metas">
+          <button className="btn primary" disabled={!src || !!busy || !status?.clip.available} onClick={() => run('similar')}
+            title={status?.clip.available ? 'CLIP: vergleicht das Bild mit allen Bildern deiner Metas' : 'Bildsuche (CLIP) ist nicht aktiviert'}>
             {busy === 'similar' ? 'Suche…' : '🔍 Ähnliche Bilder'}
           </button>
-          <button className="btn primary" disabled={!src || !!busy || !status?.available} onClick={() => run('ocr')}
+          <button className="btn primary" disabled={!src || !!busy || !status?.ocr.available} onClick={() => run('ocr')}
             title="OCR: liest Schrift und schlägt Länder anhand von Schriftsystem und Sonderzeichen vor">
             {busy === 'ocr' ? 'Lese…' : '🔤 Schrift lesen'}
           </button>

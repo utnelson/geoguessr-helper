@@ -6,9 +6,30 @@ mit Text und Bildern.
 
 ## Starten (Docker)
 
-Der Stack besteht aus drei Containern: `frontend` (nginx), `backend` (Node) und `vision` (Bilderkennung,
-optional – ~1,5 GB RAM, beim ersten Build ~2–3 GB Download für PyTorch, CLIP-Modell und Tesseract-Sprachen).
-Ohne Bilderkennung: den `vision`-Block in `docker-compose.yml` auskommentieren.
+Der Stack besteht aus `frontend` (nginx), `backend` (Node) und `ocr` (Texterkennung, Image ~0,6 GB, ~35 MB RAM).
+Die Bildsuche `clip` ist **standardmäßig aus** (siehe [CLIP aktivieren](#clip-aktivieren)).
+
+### CLIP aktivieren
+
+Die Bildsuche („Ähnliche Bilder“) braucht ~0,9 GB RAM (Image ~0,9 GB). In
+`docker-compose.yml` zwei Stellen einkommentieren (Raute `#` entfernen):
+
+```yaml
+  backend:
+    environment:
+      - CLIP_URL=http://clip:8000        # ← Raute entfernen
+
+  clip:                                  # ← diesen ganzen Block einkommentieren
+    build: ./clip
+    container_name: geoguessr-helper-clip
+    restart: unless-stopped
+    environment:
+      - TORCH_THREADS=2
+```
+
+Dann `docker compose up -d --build` (Portainer: Stack aktualisieren mit *Re-pull/Rebuild*). Die vorhandenen
+Bilder werden danach automatisch im Hintergrund indexiert – der Fortschritt steht im Fenster *📷 Bild*.
+Wieder ausschalten: beide Stellen auskommentieren und `docker compose up -d --remove-orphans`.
 
 ```bash
 docker compose up -d --build
@@ -41,7 +62,8 @@ npm run typecheck                    # optional: TypeScript prüfen
 ## Aufbau
 
 ```
-vision/             Python (FastAPI): CLIP-Bildvektoren (open_clip, CPU) + OCR (Tesseract) – nur intern
+ocr/                Python (FastAPI) + Tesseract: Texterkennung – nur intern
+clip/               Python (FastAPI) + open_clip (CPU): Bildvektoren für die Ähnlichkeitssuche – optional, nur intern
 backend/            Node.js, nur Bordmittel (http + node:sqlite)
   src/db.js         Schema + Standard-Kategorien
   src/server.js     REST-API + Bild-Uploads
@@ -65,7 +87,7 @@ docker-compose.yml
 | PUT / DELETE | `/api/attributes/:id` | bearbeiten (`key`, `values`, `rename: { from, to }`) / löschen |
 | GET | `/api/attribute-values` | alle vergebenen Merkmale `{ meta_id, country_iso, attribute_id, value }` (Rückwärtssuche) |
 | GET | `/api/search?q=` | Volltextsuche über Metas (Titel, Text, Kategorie, Regionen/Gruppen, Merkmale) |
-| GET | `/api/vision/status` | Bilderkennung verfügbar? Wie viele Bilder sind indexiert? |
+| GET | `/api/vision/status` | Status von OCR und CLIP, wie viele Bilder sind indexiert? |
 | POST | `/api/vision/similar` | Body = Bild → ähnlichste Meta-Bilder (CLIP) + Länder-Rangliste |
 | POST | `/api/vision/ocr` | Body = Bild → erkannter Text, Schrift, Länder-Vorschläge |
 | GET / PUT | `/api/settings` | Einstellungen, z.B. `{ disabled_countries: ["AQ", …] }` |
@@ -141,7 +163,7 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
   auf der Karte markiert; Klick auf einen Treffer öffnet das Land und wählt das Meta aus. Pfeiltasten + Enter, Esc.
 - **📷 Bilderkennung** (Knopf *Bild* oben): Screenshot mit **Strg+V** einfügen (oder hineinziehen), optional einen
   **Rahmen um das Interessante ziehen** (Mast, Poller, Schild …), dann
-  - **🔍 Ähnliche Bilder** (CLIP): vergleicht mit allen Bildern deiner Metas → ähnlichste Bilder + wahrscheinlichste
+  - **🔍 Ähnliche Bilder** (CLIP, optional – [aktivieren](#clip-aktivieren)): vergleicht mit allen Bildern deiner Metas → ähnlichste Bilder + wahrscheinlichste
     Länder (Top 5 auf der Karte markiert). Klick auf ein Bild öffnet das Meta. Wird besser, je mehr Bilder du sammelst.
   - **🔤 Schrift lesen** (OCR, Tesseract): erkennt das Schriftsystem (Latein, Kyrillisch, Griechisch, Thai, Hangul …),
     liest den Text mit jedem passenden Sprachmodell einzeln und bestimmt daraus die **vermutliche Sprache**
@@ -197,7 +219,7 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
    - ✅ Bereiche je Meta mit dem Pinsel einzeichnen (`metas.area`, GeoJSON MultiPolygon)
 3. ✅ Merkmale pro Kategorie + **Rückwärtssuche** („Mast mit Waffelmuster“ → passende Länder auf der Karte)
    und **Volltextsuche** (SQLite FTS5)
-4. ✅ **Bilderkennung** (Container `vision`): CLIP-Ähnlichkeitssuche über die eigenen Meta-Bilder und OCR mit
+4. ✅ **Bilderkennung** (Container `ocr`, optional `clip`): CLIP-Ähnlichkeitssuche über die eigenen Meta-Bilder und OCR mit
    Länder-Vorschlägen aus Schrift/Sonderzeichen
    - Ideen: OCR-Wörter in die Volltextsuche übernehmen, Sprach-Erkennung über Wortlisten (z.B. „ulica“, „utca“),
      CLIP-Textsuche („yellow bollard with red reflector“)

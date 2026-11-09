@@ -21,7 +21,7 @@ const SCRIPTS = [
   { name: 'Kana (Japanisch)', re: /[぀-ヿ]/g, countries: ['JP'] },
   { name: 'Chinesische Zeichen', re: /[一-鿿]/g, countries: ['CN', 'TW', 'HK', 'MO', 'JP'] },
   { name: 'Äthiopisch', re: /[ሀ-፿]/g, countries: ['ET'] },
-  { name: 'Vietnamesisch', re: /[Ạ-ỹơư]/gi, countries: ['VN'] },
+  { name: 'Vietnamesisch', re: /[Ạ-ỹơư]/gi, countries: ['VN'], min: 1 }, // diese Zeichen gibt es nur im Vietnamesischen
 ];
 
 const SLAVIC_LATIN = ['HR', 'SI', 'CZ', 'SK', 'LT', 'LV', 'RS', 'BA', 'ME'];
@@ -33,8 +33,10 @@ const CHARS = {
   ł: ['PL'], ś: ['PL'], ź: ['PL'], ż: ['PL'], ń: ['PL'], ą: ['PL', 'LT'], ę: ['PL', 'LT'],
   ř: ['CZ'], ů: ['CZ'], ě: ['CZ'], ď: ['CZ', 'SK'], ť: ['CZ', 'SK'], ň: ['CZ', 'SK'],
   ľ: ['SK'], ĺ: ['SK'], ŕ: ['SK'],
-  ğ: ['TR'], ı: ['TR'], ş: ['TR', 'RO'], ș: ['RO'], ț: ['RO'], ţ: ['RO'], ă: ['RO', 'VN'],
-  đ: ['HR', 'RS', 'BA', 'ME', 'VN'], ć: ['HR', 'RS', 'BA', 'ME', 'PL'],
+  ğ: ['TR'], ı: ['TR'], ş: ['TR', 'RO'], ș: ['RO'], ț: ['RO'], ţ: ['RO'], ă: ['RO'],
+  // đ/ă kommen auch im Vietnamesischen vor – Vietnam aber nur über eindeutige Zeichen (ơ, ư, ạ, ế …, siehe SCRIPTS),
+  // sonst landet jedes südslawische Schild auch bei Vietnam
+  đ: ['HR', 'RS', 'BA', 'ME'], ć: ['HR', 'RS', 'BA', 'ME', 'PL'],
   č: SLAVIC_LATIN, š: [...SLAVIC_LATIN, 'EE', 'FI'], ž: [...SLAVIC_LATIN, 'EE'],
   ā: ['LV'], ē: ['LV'], ī: ['LV'], ģ: ['LV'], ķ: ['LV'], ļ: ['LV'], ņ: ['LV'], ū: ['LV', 'LT'],
   ė: ['LT'], į: ['LT'], ų: ['LT'],
@@ -62,12 +64,16 @@ export function countryHints(text) {
     if (!s.reasons.includes(reason)) s.reasons.push(reason);
     scores.set(iso, s);
   };
+  const found = new Set();
   for (const script of SCRIPTS) {
     const n = (text.match(script.re) ?? []).length;
-    if (n >= 2) for (const iso of script.countries) add(iso, (3 * Math.min(n, 10)) / 10 / script.countries.length * 3, script.name);
+    if (n >= (script.min ?? 2)) found.add(script.name);
+    if (n >= (script.min ?? 2)) for (const iso of script.countries) add(iso, (3 * Math.min(n, 10)) / 10 / script.countries.length * 3, script.name);
   }
   const lower = text.toLowerCase();
   for (const [ch, countries] of Object.entries(CHARS)) {
+    // Vietnamesischer Text enthält auch đ/ă – die dann nicht dem Balkan/Rumänien zuschreiben
+    if (found.has('Vietnamesisch') && (ch === 'đ' || ch === 'ă')) continue;
     // Jedes Zeichen zählt einmal – egal in wie vielen OCR-Lesarten es vorkommt
     if (lower.includes(ch)) for (const iso of countries) add(iso, 1 / countries.length, ch);
   }
@@ -85,10 +91,10 @@ export function countryHints(text) {
 /** Tesseract-Sprache → typische Zeichen + Anzeigename */
 const LANGS = {
   hun: ['őű', 'Ungarisch'], pol: ['łśźżńąę', 'Polnisch'], ces: ['řůě', 'Tschechisch'], slk: ['ľĺŕô', 'Slowakisch'],
-  tur: ['ğış', 'Türkisch'], ron: ['șțţăî', 'Rumänisch'], hrv: ['đ', 'Kroatisch'], lav: ['āēīģķļņ', 'Lettisch'],
+  tur: ['ğış', 'Türkisch'], ron: ['șțţăî', 'Rumänisch'], hrv: ['đ', 'Kroatisch/Serbisch/Bosnisch (lateinisch)'], lav: ['āēīģķļņ', 'Lettisch'],
   lit: ['ėįų', 'Litauisch'], est: ['õ', 'Estnisch'], isl: ['ðþ', 'Isländisch'], dan: ['æø', 'Dänisch'],
   nor: ['æø', 'Norwegisch'], swe: ['å', 'Schwedisch'], fin: ['å', 'Finnisch'], deu: ['ß', 'Deutsch'],
-  vie: ['ơưđ', 'Vietnamesisch'], sqi: ['ë', 'Albanisch'], por: ['ãõ', 'Portugiesisch'], spa: ['ñ', 'Spanisch'],
+  vie: ['ơư', 'Vietnamesisch'], sqi: ['ë', 'Albanisch'], por: ['ãõ', 'Portugiesisch'], spa: ['ñ', 'Spanisch'],
   ukr: ['іїєґ', 'Ukrainisch'], srp: ['ђћџ', 'Serbisch'], mkd: ['ќѓѕ', 'Mazedonisch'], mon: ['өү', 'Mongolisch'],
   rus: ['ыэ', 'Russisch'],
 };

@@ -1,8 +1,7 @@
-"""Bilderkennung für den GeoGuessr Helper.
+"""OCR-Dienst für den GeoGuessr Helper (Tesseract).
 
-POST /embed  – Body: Bild → CLIP-Vektor (normiert) für die Ähnlichkeitssuche
-POST /ocr    – Body: Bild → erkannter Text + Schrift (Tesseract)
-GET  /health – Status + Modellname
+POST /ocr    – Body: Bild → erkannter Text, Schrift, Lesarten je Sprachmodell
+GET  /health – Status
 
 Wird nur intern vom Backend aufgerufen (kein Port nach außen nötig).
 """
@@ -12,21 +11,11 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import open_clip
 import pytesseract
-import torch
 from fastapi import FastAPI, HTTPException, Request
 from PIL import Image, ImageOps
 
-MODEL = os.environ.get("CLIP_MODEL", "ViT-B-32")
-PRETRAINED = os.environ.get("CLIP_PRETRAINED", "laion2b_s34b_b79k")
-MODEL_NAME = f"{MODEL}/{PRETRAINED}"
-torch.set_num_threads(int(os.environ.get("TORCH_THREADS", "2")))
-
-model, _, preprocess = open_clip.create_model_and_transforms(MODEL, pretrained=PRETRAINED)
-model.eval()
-
-app = FastAPI(title="GeoGuessr Helper Vision")
+app = FastAPI(title="GeoGuessr Helper OCR")
 
 # Sprachen je Schriftsystem. Jede Sprache wird einzeln gelesen (plus einmal kombiniert): Tesseract
 # erkennt Sonderzeichen wie ő, ł, ř, ğ, ș, å nur zuverlässig mit dem passenden Sprachmodell –
@@ -68,16 +57,7 @@ def load_image(data: bytes) -> Image.Image:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "model": MODEL_NAME, "dim": model.visual.output_dim, "tesseract": str(pytesseract.get_tesseract_version())}
-
-
-@app.post("/embed")
-async def embed(request: Request):
-    img = load_image(await request.body())
-    with torch.no_grad():
-        vec = model.encode_image(preprocess(img).unsqueeze(0))
-        vec = vec / vec.norm(dim=-1, keepdim=True)
-    return {"model": MODEL_NAME, "vector": [round(float(x), 6) for x in vec[0]]}
+    return {"ok": True, "tesseract": str(pytesseract.get_tesseract_version())}
 
 
 def tiled(img: Image.Image, n: int = 3) -> Image.Image:

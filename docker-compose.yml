@@ -5,21 +5,29 @@ services:
     restart: unless-stopped
     environment:
       - MAX_UPLOAD_MB=20
-      # Bilderkennung (CLIP + OCR). Leer lassen bzw. Zeile entfernen, um sie auszuschalten.
-      - VISION_URL=http://vision:8000
+      # Texterkennung (OCR) – Zeile entfernen, um sie auszuschalten
+      - OCR_URL=http://ocr:8000
+      # Bildsuche (CLIP) – zum Aktivieren die Raute entfernen (und unten den clip-Block)
+      # - CLIP_URL=http://clip:8000
     volumes:
       # SQLite-DB + hochgeladene Bilder – das hier sichern!
       - ./data:/data
 
-  # Bilderkennung: CLIP-Ähnlichkeitssuche + Tesseract-OCR (nur intern erreichbar).
-  # Braucht ~1,5 GB RAM und beim ersten Bauen ~2–3 GB Download. Wer das nicht will:
-  # diesen Block auskommentieren – der Rest der App läuft unverändert weiter.
-  vision:
-    build: ./vision
-    container_name: geoguessr-helper-vision
+  # Texterkennung: Tesseract mit ~50 Sprachen (Image ~0,6 GB, im Leerlauf ~35 MB RAM)
+  ocr:
+    build: ./ocr
+    container_name: geoguessr-helper-ocr
     restart: unless-stopped
-    environment:
-      - TORCH_THREADS=2
+
+  # Bildsuche (CLIP): ähnliche Bilder aus deinen Metas finden. Optional, braucht ~0,9 GB RAM
+  # (Image ~0,9 GB). Aktivieren: Rauten vor den folgenden Zeilen
+  # entfernen, oben CLIP_URL aktivieren, dann `docker compose up -d --build`.
+  # clip:
+  #   build: ./clip
+  #   container_name: geoguessr-helper-clip
+  #   restart: unless-stopped
+  #   environment:
+  #     - TORCH_THREADS=2
 
   frontend:
     build: ./frontend

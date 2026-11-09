@@ -15,7 +15,11 @@ const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024;
 const MAX_BACKUP_BYTES = Number(process.env.MAX_BACKUP_MB ?? 1024) * 1024 * 1024;
 const KEEP_RESTORE_POINTS = 3;
 // Bilderkennung (vision-Container); leer = ausgeschaltet
-const VISION_URL = (process.env.VISION_URL ?? '').replace(/\/$/, '');
+// Bilderkennung: zwei optionale Dienste. Leer = ausgeschaltet.
+// (VISION_URL aus der früheren Ein-Container-Variante gilt weiter für beide.)
+const trimUrl = (u) => (u ?? '').replace(/\/$/, '');
+const OCR_URL = trimUrl(process.env.OCR_URL ?? process.env.VISION_URL);
+const CLIP_URL = trimUrl(process.env.CLIP_URL ?? process.env.VISION_URL);
 const MAX_VISION_BYTES = 15 * 1024 * 1024; // so viele automatische Sicherungen vor dem Einspielen bleiben erhalten
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -371,40 +375,52 @@ function restorePoints() {
 
 const isSqlite = (buf) => buf.subarray(0, 16).toString('latin1') === 'SQLite format 3\0';
 
-// ---------- Bilderkennung (CLIP + OCR im vision-Container) ----------
+// ---------- Bilderkennung (Dienste „ocr“ und „clip“, beide optional) ----------
 
-const vision = { model: null, error: null, indexing: false, lastCheck: 0 };
+const clip = { model: null, indexing: false, lastCheck: 0 };
+const ocrService = { available: false, lastCheck: 0 };
 
-async function callVision(pathname, body, type) {
-  if (!VISION_URL) throw new HttpError(503, 'Bilderkennung ist nicht eingerichtet (VISION_URL fehlt)');
+/** Aufruf eines Bilderkennungs-Dienstes (base = OCR_URL oder CLIP_URL) */
+async function callService(base, label, pathname, body, type) {
+  if (!base) throw new HttpError(503, `${label} ist nicht aktiviert`);
   let res;
   try {
-    res = await fetch(VISION_URL + pathname, {
+    res = await fetch(base + pathname, {
       method: body ? 'POST' : 'GET',
       headers: body ? { 'Content-Type': type || 'application/octet-stream' } : undefined,
       body,
       signal: AbortSignal.timeout(120_000),
     });
   } catch (e) {
-    vision.error = 'vision-Container nicht erreichbar';
-    throw new HttpError(503, `Bilderkennung nicht erreichbar (${e.cause?.code ?? e.name})`);
+    throw new HttpError(503, `${label} nicht erreichbar (${e.cause?.code ?? e.name})`);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new HttpError(res.status === 400 ? 400 : 502, data.detail ?? `Bilderkennung: HTTP ${res.status}`);
-  vision.error = null;
+  if (!res.ok) throw new HttpError(res.status === 400 ? 400 : 502, data.detail ?? `${label}: HTTP ${res.status}`);
   return data;
 }
+const callClip = (...a) => callService(CLIP_URL, 'Bildsuche (CLIP)', ...a);
+const callOcr = (...a) => callService(OCR_URL, 'Texterkennung (OCR)', ...a);
 
-async function checkVision() {
-  if (!VISION_URL) return null;
+async function checkClip() {
+  if (!CLIP_URL) return null;
   try {
-    const h = await callVision('/health');
-    vision.model = h.model;
+    clip.model = (await callClip('/health')).model;
   } catch {
-    vision.model = null;
+    clip.model = null;
   }
-  vision.lastCheck = Date.now();
-  return vision.model;
+  clip.lastCheck = Date.now();
+  return clip.model;
+}
+
+async function checkOcr() {
+  if (!OCR_URL) return false;
+  try {
+    ocrService.available = !!(await callOcr('/health')).ok;
+  } catch {
+    ocrService.available = false;
+  }
+  ocrService.lastCheck = Date.now();
+  return ocrService.available;
 }
 
 const toBlob = (vector) => Buffer.from(new Float32Array(vector).buffer);
@@ -412,11 +428,11 @@ const fromBlob = (buf) => new Float32Array(buf.buffer, buf.byteOffset, buf.byteL
 
 /** Alle Bilder ohne (aktuellen) CLIP-Vektor nacheinander berechnen – läuft im Hintergrund */
 async function indexImages() {
-  if (!VISION_URL || vision.indexing) return;
-  vision.indexing = true;
+  if (!CLIP_URL || clip.indexing) return;
+  clip.indexing = true;
   try {
-    if (!(await checkVision())) return;
-    db.prepare('DELETE FROM image_embeddings WHERE model != ?').run(vision.model); // Modell gewechselt → neu
+    if (!(await checkClip())) return;
+    db.prepare('DELETE FROM image_embeddings WHERE model != ?').run(clip.model); // Modell gewechselt → neu
     const todo = db
       .prepare(
         `SELECT i.id, i.filename FROM meta_images i
@@ -427,7 +443,7 @@ async function indexImages() {
       const file = path.join(UPLOAD_DIR, img.filename);
       if (!fs.existsSync(file)) continue;
       const type = EXT_TO_TYPE[path.extname(img.filename).toLowerCase()];
-      const { vector, model } = await callVision('/embed', await fs.promises.readFile(file), type);
+      const { vector, model } = await callClip('/embed', await fs.promises.readFile(file), type);
       // Bild könnte inzwischen gelöscht sein
       if (db.prepare('SELECT 1 FROM meta_images WHERE id = ?').get(img.id)) {
         db.prepare('INSERT OR REPLACE INTO image_embeddings (image_id, model, vector) VALUES (?, ?, ?)')
@@ -437,7 +453,7 @@ async function indexImages() {
   } catch (e) {
     console.error('Bild-Index:', e.message);
   } finally {
-    vision.indexing = false;
+    clip.indexing = false;
   }
 }
 
@@ -731,19 +747,26 @@ route('GET', '/api/search', ({ url }) => {
 // ---------- Bilderkennung ----------
 
 route('GET', '/api/vision/status', async () => {
-  if (VISION_URL && Date.now() - vision.lastCheck > 10_000) await checkVision();
+  const now = Date.now();
+  await Promise.all([
+    OCR_URL && now - ocrService.lastCheck > 10_000 ? checkOcr() : null,
+    CLIP_URL && now - clip.lastCheck > 10_000 ? checkClip() : null,
+  ]);
   const total = db.prepare('SELECT COUNT(*) AS n FROM meta_images').get().n;
-  const indexed = vision.model
-    ? db.prepare('SELECT COUNT(*) AS n FROM image_embeddings WHERE model = ?').get(vision.model).n
+  const indexed = clip.model
+    ? db.prepare('SELECT COUNT(*) AS n FROM image_embeddings WHERE model = ?').get(clip.model).n
     : 0;
-  if (vision.model && indexed < total) setTimeout(indexImages, 10);
-  return { configured: !!VISION_URL, available: !!vision.model, model: vision.model, total, indexed, indexing: vision.indexing };
+  if (clip.model && indexed < total) setTimeout(indexImages, 10);
+  return {
+    ocr: { configured: !!OCR_URL, available: ocrService.available },
+    clip: { configured: !!CLIP_URL, available: !!clip.model, model: clip.model, total, indexed, indexing: clip.indexing },
+  };
 });
 
 // Ähnliche Bilder: Body = Bild (Screenshot/Ausschnitt) → ähnlichste Meta-Bilder + Länder-Rangliste
 route('POST', '/api/vision/similar', async ({ req }) => {
   const type = String(req.headers['content-type'] ?? '').split(';')[0];
-  const query = await callVision('/embed', await readBody(req, MAX_VISION_BYTES), type);
+  const query = await callClip('/embed', await readBody(req, MAX_VISION_BYTES), type);
   const q = Float32Array.from(query.vector);
   const rows = db
     .prepare(
@@ -781,7 +804,7 @@ route('POST', '/api/vision/similar', async ({ req }) => {
 // OCR: Body = Bild → erkannter Text + Länder-Vorschläge aus Schrift und Sonderzeichen
 route('POST', '/api/vision/ocr', async ({ req }) => {
   const type = String(req.headers['content-type'] ?? '').split(';')[0];
-  const r = await callVision('/ocr', await readBody(req, MAX_VISION_BYTES), type);
+  const r = await callOcr('/ocr', await readBody(req, MAX_VISION_BYTES), type);
   // Sprache bestimmen und daraus Länder vorschlagen (siehe ocrHints.js)
   return { ...r, ...hintsFromOcr(r) };
 });
@@ -1103,8 +1126,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 rebuildSearchIndex();
-// Bild-Index nach dem Start und danach regelmäßig vervollständigen (z.B. wenn vision später startet)
-if (VISION_URL) {
+// Bild-Index nach dem Start und danach regelmäßig vervollständigen (z.B. wenn clip später startet)
+if (CLIP_URL) {
   setTimeout(indexImages, 5_000);
   setInterval(indexImages, 5 * 60_000).unref();
 }

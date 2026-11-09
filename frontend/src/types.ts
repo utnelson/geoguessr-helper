@@ -193,13 +193,10 @@ export interface SearchHit {
 
 // ---------- Bilderkennung ----------
 
+/** Status der beiden optionalen Bilderkennungs-Dienste */
 export interface VisionStatus {
-  configured: boolean;
-  available: boolean;
-  model: string | null;
-  total: number;
-  indexed: number;
-  indexing: boolean;
+  ocr: { configured: boolean; available: boolean };
+  clip: { configured: boolean; available: boolean; model: string | null; total: number; indexed: number; indexing: boolean };
 }
 
 export interface SimilarImage {
