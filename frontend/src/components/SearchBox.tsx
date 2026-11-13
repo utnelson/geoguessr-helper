@@ -10,6 +10,8 @@ interface Props {
   onOpenMeta: (hit: SearchHit) => void;
   /** Länder mit Meta-Treffern → auf der Karte markieren (null = keine Suche aktiv) */
   onHitsChange: (isos: Set<string> | null) => void;
+  /** ändert sich bei „Startansicht“ → Suche leeren */
+  resetToken: number;
 }
 
 /** Ausschnitt mit markierten Treffern (\u0002 … \u0003 aus der Volltextsuche) */
@@ -25,7 +27,7 @@ function Snippet({ text }: { text: string }) {
 }
 
 /** Suchfeld oben: Länder nach Name + Volltextsuche über alle Metas */
-export function SearchBox({ countries, countryNames, onOpenCountry, onOpenMeta, onHitsChange }: Props) {
+export function SearchBox({ countries, countryNames, onOpenCountry, onOpenMeta, onHitsChange, resetToken }: Props) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -89,6 +91,9 @@ export function SearchBox({ countries, countryNames, onOpenCountry, onOpenMeta, 
     setQ('');
     setOpen(false);
   };
+  useEffect(() => {
+    if (resetToken) clear();
+  }, [resetToken]);
 
   const metaCountries = new Set(hits.map((h) => h.country_iso)).size;
 

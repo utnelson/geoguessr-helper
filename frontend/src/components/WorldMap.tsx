@@ -44,6 +44,8 @@ interface Props {
   /** Zeichenmodus (Pinsel) – null = aus */
   drawing: DrawSettings | null;
   drawApi: MutableRefObject<DrawApi | null>;
+  /** ändert sich bei „Startansicht“ (Taste R) → zurück zur Weltansicht wie beim Laden */
+  resetToken: number;
 }
 
 // ---------- Paint-Ausdrücke: normale Ansicht vs. Infografik ----------
@@ -173,7 +175,7 @@ type Hover = { kind: 'country' | 'region'; id: string; name: string; sub?: strin
 export function WorldMap({
   geojson, countries, stats, selectedIso, onSelect, regionData, regionCounts, selectedRegions, onSelectRegions,
   infographic, onOpenImage, continent, showLabels, onToggleLabels, disabled, metaAreas, focusBBox, drawing, drawApi,
-  marks, marksLabel,
+  marks, marksLabel, resetToken,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -195,12 +197,6 @@ export function WorldMap({
   const prevInfo = useRef<string[]>([]);
   const prevCountryInfo = useRef<string[]>([]);
   const [, setViewTick] = useState(0);
-  // Infografik-Karussell: aktuelles Bild je Kasten
-  const [slides, setSlides] = useState<Record<string, number>>({});
-  const slide = (key: string, to: number, count: number) =>
-    setSlides((s) => ({ ...s, [key]: (to + count) % count }));
-  // Neue Daten (z.B. Bilder umsortiert) → jeder Kasten startet wieder beim Titelbild
-  useEffect(() => setSlides({}), [infographic]);
 
   // Karte einmalig aufbauen
   useEffect(() => {
@@ -586,6 +582,15 @@ export function WorldMap({
     );
   }
 
+  // Startansicht (Taste R): zurück zur Weltansicht – auch wenn nur verschoben/gezoomt wurde.
+  // Steht vor dem Zoom-Effekt, damit nicht zweimal geflogen wird.
+  useEffect(() => {
+    const map = loadedRef.current ? mapRef.current : null;
+    if (!ready || !map || !resetToken) return;
+    lastTarget.current = 'world';
+    map.flyTo({ ...WORLD_VIEW, duration: 900 });
+  }, [ready, resetToken]);
+
   // Hineinzoomen: auf die (einzelne) Region, sonst aufs Land, sonst Weltansicht.
   // Bei Mehrfachauswahl (Strg+Klick) bleibt die Ansicht stehen.
   const multi = selectedRegions.length > 1;
@@ -651,7 +656,6 @@ export function WorldMap({
           </svg>
           {placed.map((c) => {
             const imgs = c.item.images;
-            const idx = Math.min(slides[c.item.key] ?? 0, Math.max(0, imgs.length - 1));
             const showImage = imgs.length > 0 && c.h >= 100;
             const showText = !!c.item.text && c.h >= (showImage ? 200 : 90);
             return (
@@ -664,33 +668,23 @@ export function WorldMap({
               >
                 <div className="info-card-label" style={{ color: c.item.color }}>{c.item.label}</div>
                 {showImage && (
-                  <div className="info-carousel">
-                    <img
-                      src={imgs[idx]}
-                      alt={c.item.title}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenImage(imgs[idx]);
-                      }}
-                    />
-                    {imgs.length > 1 && (
-                      <>
-                        <button className="carousel-btn prev" title="Vorheriges Bild"
-                          onClick={(e) => { e.stopPropagation(); slide(c.item.key, idx - 1, imgs.length); }}>‹</button>
-                        <button className="carousel-btn next" title="Nächstes Bild"
-                          onClick={(e) => { e.stopPropagation(); slide(c.item.key, idx + 1, imgs.length); }}>›</button>
-                        <span className="carousel-count">{idx + 1}/{imgs.length}</span>
-                        <span className="carousel-dots">
-                          {imgs.map((_, k) => (
-                            <i key={k} className={k === idx ? 'on' : ''}
-                              onClick={(e) => { e.stopPropagation(); slide(c.item.key, k, imgs.length); }} />
-                          ))}
-                        </span>
-                      </>
-                    )}
+                  // alle Bilder nebeneinander (Reihenfolge wie im Meta-Formular), Klick = groß ansehen
+                  <div className={`info-images ${imgs.length > 1 ? 'multi' : ''}`}>
+                    {imgs.map((src, k) => (
+                      <img
+                        key={src}
+                        src={src}
+                        alt={`${c.item.title} ${k + 1}`}
+                        title="Bild groß ansehen"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenImage(src);
+                        }}
+                      />
+                    ))}
                   </div>
                 )}
-                {!showImage && imgs.length > 1 && <span className="carousel-count inline">🖼 {imgs.length} Bilder</span>}
+                {!showImage && imgs.length > 0 && <span className="info-img-count">🖼 {imgs.length} {imgs.length === 1 ? 'Bild' : 'Bilder'}</span>}
                 {c.item.title && <div className="info-card-title">{c.item.title}</div>}
                 {showText && <div className="info-card-text">{c.item.text}</div>}
               </div>

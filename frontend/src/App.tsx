@@ -58,6 +58,8 @@ export default function App() {
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar') === 'collapsed');
   const [lightbox, setLightbox] = useState<string | null>(null);
+  // Startansicht (Taste R / Klick auf die Überschrift)
+  const [resetToken, setResetToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // Rückwärtssuche: Merkmale, vergebene Werte, aktive Filter, Klappmenü
   const [attributes, setAttributes] = useState<Attribute[]>([]);
@@ -123,6 +125,38 @@ export default function App() {
     if (decodeURIComponent(location.hash.slice(1)) !== hash) location.hash = hash;
     setSelection(next);
   };
+
+  /**
+   * Startansicht wie beim Laden: Weltkarte, kein Land/keine Region, Kontinent „Welt“, keine Kategorie,
+   * Menüs zu, Suche leer. Gesetzte Filter bleiben (die stehen sichtbar in der Filterleiste).
+   * Bei offenem Formular passiert nichts – sonst gingen ungespeicherte Eingaben verloren.
+   */
+  const formOpen = !!(editing || groupEditing || drawing);
+  const resetView = () => {
+    if (formOpen) return;
+    select(null);
+    setContinentId(null);
+    setActiveCategory(null);
+    setSelectedMetaId(null);
+    setFilterOpen(false);
+    setVisionOpen(false);
+    setOptionsOpen(false);
+    setLightbox(null);
+    setResetToken((t) => t + 1);
+  };
+  const resetRef = useRef(resetView);
+  resetRef.current = resetView;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'r' && e.key !== 'R') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // Strg+R = Neu laden des Browsers
+      const el = e.target as HTMLElement;
+      if (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return; // beim Tippen
+      resetRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const selectRegions = (regions: string[]) => select(selectedIso, regions);
 
   const loadMetas = useCallback(async (iso: string) => {
@@ -406,7 +440,7 @@ export default function App() {
   return (
     <div className={`app ${country ? 'has-country' : ''} ${(country ? infographic : worldInfographic) ? 'infographic' : ''}`}>
       <header className="topbar">
-        <h1>🌍 GeoGuessr Helper</h1>
+        <h1 className="home-link" onClick={resetView} title="Zur Startansicht (Taste R)">🌍 GeoGuessr Helper</h1>
         <span className="muted">{Object.keys(stats).length} Länder · {totalMetas} Metas</span>
         {geo && (
           <SearchBox
@@ -415,6 +449,7 @@ export default function App() {
             onOpenCountry={(iso) => select(iso)}
             onOpenMeta={openMeta}
             onHitsChange={setSearchHits}
+            resetToken={resetToken}
           />
         )}
         <button
@@ -590,6 +625,7 @@ export default function App() {
           drawApi={drawApi}
           marks={countryMarks}
           marksLabel={marksLabel}
+          resetToken={resetToken}
         />
       ) : (
         <div className="map-wrap loading">Lade Karte…</div>

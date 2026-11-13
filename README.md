@@ -148,7 +148,7 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
   Betrieb kopieren – dann fehlen evtl. Änderungen aus `geo.db-wal`.
 - **Proxmox:** den Docker-LXC in die Proxmox-Backups aufnehmen (Snapshot-Modus).
 - Die App hat keinen Login: Wer sie erreicht, kann auch ein Backup einspielen. Nur geschützt (VPN / Proxy mit Login) freigeben.
-- **🔎 Rückwärtssuche** (Knopf *Filter* oben): klappt links über der Karte ein Menü auf. Werte anklicken, die du
+- **🔎 Rückwärtssuche** (Knopf *Filter* oben): klappt rechts über der Karte ein Menü auf. Werte anklicken, die du
   im Spiel siehst (z.B. *Masten › Muster: Waffel*, *Kennzeichen › Farbe hinten: gelb*) → die Karte färbt sofort:
   **türkis = passt**, grau = ohne Angabe (Land hat dazu noch kein Meta), **dunkel = ausgeschlossen**.
   Oben im Menü stehen die passenden Länder zum Anklicken. Mehrere Werte eines Merkmals = *oder*, verschiedene
@@ -208,8 +208,11 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 - **Infografik im Land**: Kategorie in der Kategorie-Leiste anklicken (z.B. *Masten*). Die Karte färbt jede Gruppe in ihrer
   Farbe und zeigt pro Meta einen Kasten mit Bild, Titel und Text, verbunden mit einer Linie zur Region;
   landesweite Metas stehen ohne Linie daneben. Beim Verschieben/Zoomen ordnen sich die Kästen neu.
-  Hat ein Meta **mehrere Bilder**, zeigt der Kasten ein Karussell: ‹ › blättern, „2/3“ und Punkte zeigen,
-  wie viele Bilder es gibt (Klick auf einen Punkt springt dorthin, Klick aufs Bild vergrößert).
+  Hat ein Meta **mehrere Bilder**, stehen sie im Kasten **nebeneinander** (Reihenfolge wie im Formular,
+  Klick aufs Bild vergrößert). Ist der Kasten zu klein für Bilder, zeigt er „🖼 N Bilder“.
+- **Startansicht:** Taste **R** oder Klick auf die Überschrift *🌍 GeoGuessr Helper* → zurück zur Weltkarte wie
+  beim Laden (kein Land, Kontinent *Welt*, keine Kategorie, Menüs zu, Suche leer). Gesetzte Filter bleiben
+  erhalten. Beim Tippen in Feldern und bei offenem Formular/Zeichnen passiert nichts.
 
 ## Roadmap
 

@@ -52,7 +52,7 @@ export function FilterPanel({
     <aside className="filter-panel">
       <div className="filter-head">
         <strong>🔎 Rückwärtssuche</strong>
-        <button className="btn ghost small" onClick={onClose} title="Einklappen – die Filter bleiben aktiv">‹ Einklappen</button>
+        <button className="btn ghost small" onClick={onClose} title="Einklappen – die Filter bleiben aktiv">Einklappen ›</button>
       </div>
 
       {result && (
