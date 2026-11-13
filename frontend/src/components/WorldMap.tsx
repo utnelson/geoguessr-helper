@@ -96,6 +96,27 @@ const CARD_MIN_H = 64;
 const MARGIN = 12;
 const MARGIN_BOTTOM = 72; // Platz für die Zoom-Knöpfe unten rechts
 const GAP = 10;
+/** ab dieser Kastenhöhe: Bilder groß unter dem Namen, darunter kompakt (Vorschaubilder links neben dem Text) */
+const CARD_BIG_H = 100;
+const IMG_GAP = 3;
+
+/**
+ * Breite eines Kastens: Die Höhe bestimmt das Layout, jedes weitere Bild macht den Kasten breiter
+ * (statt die Bilder schmaler zu quetschen). `thumbs` = Breite der Bildleiste im kompakten Kasten.
+ */
+function cardSize(item: InfoItem, h: number, base: number, maxW: number): { w: number; thumbs: number } {
+  const k = item.images.length;
+  if (!k) return { w: base, thumbs: 0 };
+  if (h >= CARD_BIG_H) {
+    const imgH = h - 60; // Name, Titel, Abstände
+    const per = Math.max(60, Math.min(base - 16, imgH * 0.9));
+    return { w: Math.min(maxW, base + (k - 1) * (per + IMG_GAP)), thumbs: 0 };
+  }
+  const per = Math.max(36, (h - 16) * 0.95); // Vorschaubild ≈ quadratisch, so hoch wie der Kasten
+  const text = Math.max(90, base * 0.75);
+  const thumbs = Math.min(maxW - text - 24, k * per + (k - 1) * IMG_GAP);
+  return { w: text + thumbs + 24, thumbs };
+}
 
 interface PlacedCard {
   item: InfoItem;
@@ -103,6 +124,8 @@ interface PlacedCard {
   y: number;
   w: number;
   h: number;
+  /** kompakter Kasten: Breite der Bildleiste links (0 = Bilder groß bzw. keine) */
+  thumbs: number;
   anchor: { x: number; y: number } | null;
   side: 'left' | 'right';
 }
@@ -123,14 +146,20 @@ function layoutCards(
     const perCol = Math.max(1, Math.floor((H - MARGIN - MARGIN_BOTTOM + GAP) / (CARD_MIN_H + GAP)));
     const cols = Math.min(3, Math.ceil(list.length / perCol));
     const w = cols > 1 ? Math.min(cardW, 150) : cardW;
+    // Kästen mit mehreren Bildern werden breiter – höchstens so, dass die Karte in der Mitte frei bleibt
+    const maxW = Math.max(w, Math.min(w * 2.6, (W * 0.42) / cols));
     const sorted = [...list].sort((a, b) => (a.anchor?.y ?? Infinity) - (b.anchor?.y ?? Infinity));
+    // Spalten von außen nach innen; die nächste Spalte beginnt hinter dem breitesten Kasten der vorigen
+    let offset = MARGIN;
     return Array.from({ length: cols }, (_, c) => {
-      const x = s === 'left' ? MARGIN + c * (w + GAP) : W - MARGIN - w - c * (w + GAP);
-      return column(sorted.filter((_, i) => i % cols === c), s, x, w);
+      const cards = column(sorted.filter((_, i) => i % cols === c), s, offset, w, maxW);
+      offset += Math.max(0, ...cards.map((k) => k.w)) + GAP;
+      return cards;
     }).flat();
   };
 
-  const column = (list: typeof entries, side: 'left' | 'right', x: number, cardW: number): PlacedCard[] => {
+  /** offset = Abstand der Spalte vom Rand (links: x, rechts: rechte Kante); Kästen wachsen zur Mitte hin */
+  const column = (list: typeof entries, side: 'left' | 'right', offset: number, cardW: number, maxW: number): PlacedCard[] => {
     if (list.length === 0) return [];
     const n = list.length;
     const h = Math.max(48, Math.min(CARD_MAX_H, (H - MARGIN - MARGIN_BOTTOM - GAP * (n - 1)) / n));
@@ -142,7 +171,11 @@ function layoutCards(
       ys[n - 1] = bottom;
       for (let i = n - 2; i >= 0; i--) ys[i] = Math.min(ys[i], ys[i + 1] - h - GAP); // von unten zurück
     }
-    return sorted.map((e, i) => ({ item: e.item, x, y: Math.max(ys[i], MARGIN), w: cardW, h, anchor: e.anchor, side }));
+    return sorted.map((e, i) => {
+      const { w, thumbs } = cardSize(e.item, h, cardW, maxW);
+      const x = side === 'left' ? offset : W - offset - w;
+      return { item: e.item, x, y: Math.max(ys[i], MARGIN), w, h, thumbs, anchor: e.anchor, side };
+    });
   };
   return [...side(left, 'left'), ...side(right, 'right')];
 }
@@ -656,37 +689,57 @@ export function WorldMap({
           </svg>
           {placed.map((c) => {
             const imgs = c.item.images;
-            const showImage = imgs.length > 0 && c.h >= 100;
-            const showText = !!c.item.text && c.h >= (showImage ? 200 : 90);
+            const big = imgs.length > 0 && c.h >= CARD_BIG_H;
+            const compact = imgs.length > 0 && !big;
+            const showText = !!c.item.text && c.h >= (big ? 200 : compact ? 84 : 90);
+            const images = (
+              // alle Bilder nebeneinander (Reihenfolge wie im Meta-Formular), Klick = groß ansehen
+              <div className="info-images" style={compact ? { width: c.thumbs } : undefined}>
+                {imgs.map((src, k) => (
+                  <img
+                    key={src}
+                    src={src}
+                    alt={`${c.item.title} ${k + 1}`}
+                    title="Bild groß ansehen"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenImage(src);
+                    }}
+                  />
+                ))}
+              </div>
+            );
+            const label = <div className="info-card-label" style={{ color: c.item.color }}>{c.item.label}</div>;
+            const texts = (
+              <>
+                {c.item.title && <div className="info-card-title">{c.item.title}</div>}
+                {showText && <div className="info-card-text">{c.item.text}</div>}
+              </>
+            );
             return (
               <div
                 key={c.item.key}
-                className={`info-card ${c.item.iso ? 'clickable' : ''}`}
+                className={`info-card ${c.item.iso ? 'clickable' : ''} ${compact ? 'compact' : ''}`}
                 style={{ left: c.x, top: c.y, width: c.w, height: c.h, borderColor: c.item.color }}
                 onClick={() => c.item.iso && onSelect(c.item.iso)}
                 title={c.item.iso ? `${c.item.label} öffnen` : undefined}
               >
-                <div className="info-card-label" style={{ color: c.item.color }}>{c.item.label}</div>
-                {showImage && (
-                  // alle Bilder nebeneinander (Reihenfolge wie im Meta-Formular), Klick = groß ansehen
-                  <div className={`info-images ${imgs.length > 1 ? 'multi' : ''}`}>
-                    {imgs.map((src, k) => (
-                      <img
-                        key={src}
-                        src={src}
-                        alt={`${c.item.title} ${k + 1}`}
-                        title="Bild groß ansehen"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenImage(src);
-                        }}
-                      />
-                    ))}
-                  </div>
+                {compact ? (
+                  // wenig Platz (viele Kästen): Vorschaubilder links, Name und Titel rechts
+                  <>
+                    {images}
+                    <div className="info-card-body">
+                      {label}
+                      {texts}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {label}
+                    {big && images}
+                    {texts}
+                  </>
                 )}
-                {!showImage && imgs.length > 0 && <span className="info-img-count">🖼 {imgs.length} {imgs.length === 1 ? 'Bild' : 'Bilder'}</span>}
-                {c.item.title && <div className="info-card-title">{c.item.title}</div>}
-                {showText && <div className="info-card-text">{c.item.text}</div>}
               </div>
             );
           })}

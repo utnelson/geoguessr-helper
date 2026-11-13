@@ -208,8 +208,9 @@ Die Tabellen für Attribute sind schon angelegt, UI folgt in Etappe 3.
 - **Infografik im Land**: Kategorie in der Kategorie-Leiste anklicken (z.B. *Masten*). Die Karte färbt jede Gruppe in ihrer
   Farbe und zeigt pro Meta einen Kasten mit Bild, Titel und Text, verbunden mit einer Linie zur Region;
   landesweite Metas stehen ohne Linie daneben. Beim Verschieben/Zoomen ordnen sich die Kästen neu.
-  Hat ein Meta **mehrere Bilder**, stehen sie im Kasten **nebeneinander** (Reihenfolge wie im Formular,
-  Klick aufs Bild vergrößert). Ist der Kasten zu klein für Bilder, zeigt er „🖼 N Bilder“.
+  Hat ein Meta **mehrere Bilder**, stehen sie im Kasten **nebeneinander** – der Kasten wird dafür breiter
+  (Reihenfolge wie im Formular, Klick aufs Bild vergrößert). Bei vielen Kästen werden sie flach: Vorschaubilder
+  links, Land und Titel rechts.
 - **Startansicht:** Taste **R** oder Klick auf die Überschrift *🌍 GeoGuessr Helper* → zurück zur Weltkarte wie
   beim Laden (kein Land, Kontinent *Welt*, keine Kategorie, Menüs zu, Suche leer). Gesetzte Filter bleiben
   erhalten. Beim Tippen in Feldern und bei offenem Formular/Zeichnen passiert nichts.

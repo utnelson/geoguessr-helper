@@ -602,19 +602,16 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-radi
   padding: 0 4px;
 }
 
-/* ---------- Infografik: Bild-Karussell ---------- */
+/* ---------- Infografik: Bilder im Kasten ---------- */
 .info-images { flex: 1 1 0; min-height: 0; display: flex; gap: 3px; }
 .info-images img {
   flex: 1 1 0; min-width: 0; min-height: 0; width: 100%; height: 100%;
   object-fit: contain; background: #000; border-radius: 6px; cursor: zoom-in;
 }
-/* mehrere Bilder: Fläche füllen, damit schmale Spalten nicht nur aus Rand bestehen */
-.info-images.multi img { object-fit: cover; }
+.info-card.compact { flex-direction: row; gap: 6px; }
+.info-card.compact .info-images { flex: 0 0 auto; height: 100%; }
+.info-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .info-images img:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
-.info-img-count {
-  align-self: flex-start; font-size: 0.7rem; padding: 1px 6px; border-radius: 999px;
-  background: rgba(0, 0, 0, 0.6); color: #fff;
-}
 
 /* ---------- Suchfeld (Länder + Volltextsuche) ---------- */
 .searchbox { position: relative; margin-left: auto; display: flex; align-items: center; }
